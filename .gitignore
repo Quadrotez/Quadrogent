@@ -1,1 +1,25 @@
-Nothing should be ignored since the modified files are only Python source files (.py) which are legitimate source code and not build artifacts, dependencies, or temporary files.
+```
+# Compressed archives
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
