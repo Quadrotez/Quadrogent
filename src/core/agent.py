@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Callable
 
 from src.core.llm_client import LLMClient
@@ -19,12 +20,17 @@ SYSTEM_WORK = """Ты — Quadrogent, ИИ-агент с открытым исх
 5. Когда задача полностью выполнена, напиши "ready" на отдельной строке.
 
 Доступные инструменты:
-- execute_command: выполнить команду Linux в Docker (root, интернет есть). Рабочая директория /workspace, папка uploads доступна как /workspace/uploads
+- execute_command: выполнить команду Linux в Docker (root, интернет есть).
+  Рабочая директория /workspace, папка uploads доступна как /workspace/uploads.
 - web_search: поиск в интернете
-- read_file: прочитать файл из uploads/ по имени файла (например "report.pdf")
-- write_file: записать файл в uploads/ — пользователь получит кнопку скачать
-- delete_file: удалить файл или папку из uploads/ (для очистки всего используй путь "." )
-- list_files: получить список файлов в папке uploads/
+- read_file: прочитать текстовый файл из uploads/ по имени (например "report.pdf")
+- write_file: записать ТЕКСТОВЫЙ файл в uploads/ — пользователь получит кнопку скачать.
+  НЕ ИСПОЛЬЗОВАТЬ для бинарных файлов (zip, png, exe и т.д.)!
+- deliver_file: показать пользователю файл, уже созданный в /workspace/uploads/.
+  Используй вместо write_file для бинарных файлов.
+  Workflow для zip/image/binary: execute_command создаёт файл в /workspace/uploads/, затем deliver_file(имя_файла).
+- delete_file: удалить файл или папку из uploads/ (путь "." очищает всё)
+- list_files: список файлов в uploads/
 """
 
 SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
@@ -40,14 +46,19 @@ SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исх
 2. Выполняй, используя инструменты.
 3. Когда готово — напиши "ready".
 
-Если это обычный вопрос или разговор — просто ответь. Используй markdown для форматирования.
+Если это обычный вопрос — просто ответь. Используй markdown для форматирования.
 
 Доступные инструменты:
-- execute_command: команда Linux в Docker (root, интернет). Рабочая директория /workspace, uploads → /workspace/uploads
+- execute_command: команда Linux в Docker (root, интернет).
+  Рабочая директория /workspace, uploads → /workspace/uploads.
 - web_search: поиск в интернете
-- read_file: прочитать файл из uploads/ по имени
-- write_file: записать файл в uploads/ — пользователь получит кнопку скачать
-- delete_file: удалить файл или папку из uploads/ (путь "." — очистить всё)
+- read_file: прочитать текстовый файл из uploads/ по имени
+- write_file: записать ТЕКСТОВЫЙ файл в uploads/ — пользователь получит кнопку скачать.
+  НЕ ИСПОЛЬЗОВАТЬ для бинарных файлов (zip, png, exe и т.д.)!
+- deliver_file: показать пользователю файл, уже созданный в /workspace/uploads/.
+  Используй вместо write_file для бинарных файлов.
+  Workflow для zip/image/binary: execute_command создаёт файл в /workspace/uploads/, затем deliver_file(имя_файла).
+- delete_file: удалить файл или папку из uploads/ (путь "." очищает всё)
 - list_files: список файлов в uploads/
 """
 
@@ -173,6 +184,22 @@ class Agent:
             except Exception as e:
                 self._emit_tool(name, "", f"Error: {e}")
                 return f"Error listing files: {e}"
+
+        elif name == "deliver_file":
+            path = arguments.get("path", "").strip()
+            try:
+                abs_path = self.files._safe_path(path)
+                if not os.path.exists(abs_path):
+                    result = f"Error: file '{path}' not found in uploads/"
+                    self._emit_tool(name, path, result)
+                    return result
+                self._emit_tool(name, path, f"Delivered to user: {abs_path}")
+                if self.on_file_ready:
+                    self.on_file_ready(path, abs_path)
+                return f"File delivered: {abs_path}"
+            except Exception as e:
+                self._emit_tool(name, path, f"Error: {e}")
+                return f"Error: {e}"
 
         return f"Unknown tool: {name}"
 

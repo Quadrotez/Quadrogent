@@ -2,13 +2,15 @@ import html
 import json
 import os
 import re
+import shutil
+
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
     QTextEdit, QPushButton, QLabel, QFileDialog,
-    QApplication, QSizePolicy,
+    QSizePolicy,
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QEvent
-from PyQt5.QtGui import QKeyEvent
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QDesktopServices, QKeyEvent
 
 from src.ui.styles import MESSAGE_CSS
 
@@ -16,12 +18,6 @@ from src.ui.styles import MESSAGE_CSS
 # ── Markdown → HTML (lightweight, QTextBrowser-safe) ─────────────────────────
 
 def _md_to_html(text: str) -> str:
-    """
-    Convert a subset of Markdown to HTML that QTextBrowser can render.
-    Handles: code blocks, inline code, headers, bold, italic,
-             unordered/ordered lists, blockquotes, horizontal rules, links.
-    """
-    # 1. Fenced code blocks  ```lang\n...\n```
     def _fence(m):
         lang = html.escape(m.group(1).strip())
         code = html.escape(m.group(2))
@@ -30,50 +26,40 @@ def _md_to_html(text: str) -> str:
 
     text = re.sub(r"```(\w*)\n(.*?)```", _fence, text, flags=re.DOTALL)
 
-    # 2. Escape HTML in remaining text (but skip already-escaped <div>/<pre> blocks)
-    #    Strategy: split on block-level HTML we just inserted, escape the rest
-    parts = re.split(r"(<div class=\"code-block\">.*?</div>)", text, flags=re.DOTALL)
+    parts = re.split(r'(<div class="code-block">.*?</div>)', text, flags=re.DOTALL)
     result_parts = []
     for i, part in enumerate(parts):
-        if i % 2 == 1:          # already HTML block
+        if i % 2 == 1:
             result_parts.append(part)
-        else:
-            # Inline escaping + inline markdown
-            p = html.escape(part)
-            # Inline code  `code`
-            p = re.sub(r"`([^`\n]+)`", r'<code>\1</code>', p)
-            # Bold **text** or __text__
-            p = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", p)
-            p = re.sub(r"__(.+?)__",     r"<strong>\1</strong>", p)
-            # Italic *text* or _text_
-            p = re.sub(r"\*([^*\n]+)\*", r"<em>\1</em>", p)
-            p = re.sub(r"_([^_\n]+)_",   r"<em>\1</em>", p)
-            # Links [text](url)
-            p = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', p)
-            # Horizontal rule ---
-            p = re.sub(r"(?m)^-{3,}\s*$", "<hr>", p)
-            # Headers (must be at line start)
-            p = re.sub(r"(?m)^#{6}\s+(.+)$", r"<h6>\1</h6>", p)
-            p = re.sub(r"(?m)^#{5}\s+(.+)$", r"<h5>\1</h5>", p)
-            p = re.sub(r"(?m)^#{4}\s+(.+)$", r"<h4>\1</h4>", p)
-            p = re.sub(r"(?m)^#{3}\s+(.+)$", r"<h3>\1</h3>", p)
-            p = re.sub(r"(?m)^#{2}\s+(.+)$", r"<h2>\1</h2>", p)
-            p = re.sub(r"(?m)^#\s+(.+)$",    r"<h1>\1</h1>", p)
-            # Blockquote > text
-            p = re.sub(r"(?m)^&gt;\s*(.+)$", r'<div class="blockquote">\1</div>', p)
-            # Unordered list items  - item  or  * item
-            p = re.sub(r"(?m)^[\*\-]\s+(.+)$", r"<li>\1</li>", p)
-            # Ordered list items  1. item
-            p = re.sub(r"(?m)^\d+\.\s+(.+)$", r"<li>\1</li>", p)
-            # Wrap consecutive <li> in <ul>
-            p = re.sub(r"(<li>.*?</li>(\n|$))+", lambda m: "<ul>" + m.group(0) + "</ul>", p, flags=re.DOTALL)
-            # Newlines → <br> (but not inside block elements)
-            p = p.replace("\n", "<br>")
-            result_parts.append(p)
+            continue
+        p = html.escape(part)
+        p = re.sub(r"`([^`\n]+)`", r'<code>\1</code>', p)
+        p = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", p)
+        p = re.sub(r"__(.+?)__",     r"<strong>\1</strong>", p)
+        p = re.sub(r"\*([^*\n]+)\*", r"<em>\1</em>", p)
+        p = re.sub(r"_([^_\n]+)_",   r"<em>\1</em>", p)
+        p = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', p)
+        p = re.sub(r"(?m)^-{3,}\s*$", "<hr>", p)
+        p = re.sub(r"(?m)^#{6}\s+(.+)$", r"<h6>\1</h6>", p)
+        p = re.sub(r"(?m)^#{5}\s+(.+)$", r"<h5>\1</h5>", p)
+        p = re.sub(r"(?m)^#{4}\s+(.+)$", r"<h4>\1</h4>", p)
+        p = re.sub(r"(?m)^#{3}\s+(.+)$", r"<h3>\1</h3>", p)
+        p = re.sub(r"(?m)^#{2}\s+(.+)$", r"<h2>\1</h2>", p)
+        p = re.sub(r"(?m)^#\s+(.+)$",    r"<h1>\1</h1>", p)
+        p = re.sub(r"(?m)^&gt;\s*(.+)$", r'<div class="blockquote">\1</div>', p)
+        p = re.sub(r"(?m)^[\*\-]\s+(.+)$", r"<li>\1</li>", p)
+        p = re.sub(r"(?m)^\d+\.\s+(.+)$",  r"<li>\1</li>", p)
+        p = re.sub(
+            r"(<li>.*?</li>(\n|$))+",
+            lambda m: "<ul>" + m.group(0) + "</ul>",
+            p, flags=re.DOTALL,
+        )
+        p = p.replace("\n", "<br>")
+        result_parts.append(p)
     return "".join(result_parts)
 
 
-# ── File icon helper ──────────────────────────────────────────────────────────
+# ── File icon / size helpers ──────────────────────────────────────────────────
 
 _EXT_ICONS = {
     "py": "🐍", "js": "🟨", "ts": "🔷", "html": "🌐", "css": "🎨",
@@ -93,9 +79,9 @@ def _file_icon(filename: str) -> str:
 def _file_size_str(path: str) -> str:
     try:
         s = os.path.getsize(path)
-        if s < 1024:      return f"{s} B"
-        if s < 1048576:   return f"{s // 1024} KB"
-        return f"{s // 1048576} MB"
+        if s < 1024:        return f"{s} B"
+        if s < 1_048_576:   return f"{s // 1024} KB"
+        return f"{s // 1_048_576} MB"
     except OSError:
         return ""
 
@@ -103,7 +89,6 @@ def _file_size_str(path: str) -> str:
 # ── MessageInput ──────────────────────────────────────────────────────────────
 
 class MessageInput(QTextEdit):
-    """Enter sends; Shift+Enter inserts newline."""
     submitted = pyqtSignal()
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -116,16 +101,14 @@ class MessageInput(QTextEdit):
             super().keyPressEvent(event)
 
 
-# ── FileChip (input-area badge) ───────────────────────────────────────────────
+# ── FileChip ──────────────────────────────────────────────────────────────────
 
 class FileChip(QWidget):
-    """Small file badge shown above the input field."""
     removed = pyqtSignal()
 
     def __init__(self, filename: str, parent=None):
         super().__init__(parent)
         self.filename = filename
-
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 5, 8, 5)
         layout.setSpacing(7)
@@ -135,9 +118,7 @@ class FileChip(QWidget):
         layout.addWidget(icon)
 
         name = QLabel(filename)
-        name.setStyleSheet(
-            "background: transparent; color: #c0c0c0; font-size: 12px;"
-        )
+        name.setStyleSheet("background: transparent; color: #c0c0c0; font-size: 12px;")
         name.setMaximumWidth(260)
         layout.addWidget(name, 1)
 
@@ -151,8 +132,7 @@ class FileChip(QWidget):
         layout.addWidget(rm)
 
         self.setStyleSheet(
-            "FileChip { background: #181818; border: 1px solid #2a2a2a; "
-            "border-radius: 8px; }"
+            "FileChip { background: #181818; border: 1px solid #2a2a2a; border-radius: 8px; }"
         )
         self.setFixedHeight(34)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -161,20 +141,28 @@ class FileChip(QWidget):
 # ── ChatWidget ────────────────────────────────────────────────────────────────
 
 class ChatWidget(QWidget):
-    send_message   = pyqtSignal(str)   # LLM text (may include [Файл:] prefix)
-    attach_file    = pyqtSignal(str)   # file path chosen in dialog
+    send_message   = pyqtSignal(str)
+    attach_file    = pyqtSignal(str)
     save_memory    = pyqtSignal()
     stop_requested = pyqtSignal()
+
+    _STREAM_INTERVAL_MS = 40   # ~25 fps streaming updates
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("chatArea")
-        self._is_busy = False
-        self._messages_html = ""
+        self._is_busy        = False
+        self._messages_html  = ""
         self._streaming_text = ""
         self._streaming_base = ""
-        self._pending_file: tuple[str, str] | None = None   # (filename, abs_path)
+        self._stream_buffer  = ""
+        self._pending_file: tuple[str, str] | None = None
         self._file_chip: FileChip | None = None
+
+        self._stream_timer = QTimer(self)
+        self._stream_timer.setInterval(self._STREAM_INTERVAL_MS)
+        self._stream_timer.timeout.connect(self._flush_stream)
+
         self._build()
 
     # ── Build ─────────────────────────────────────────────
@@ -184,31 +172,28 @@ class ChatWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Messages area
         self.browser = QTextBrowser()
         self.browser.setObjectName("chatBrowser")
-        self.browser.setOpenExternalLinks(True)
+        self.browser.setOpenLinks(False)
+        self.browser.setOpenExternalLinks(False)
+        self.browser.anchorClicked.connect(self._on_link_clicked)
         self.browser.setHtml(MESSAGE_CSS + "<body></body>")
         layout.addWidget(self.browser, 1)
 
-        # Input container
         self._input_container = QWidget()
         self._input_container.setObjectName("inputArea")
         self._input_layout = QVBoxLayout(self._input_container)
         self._input_layout.setContentsMargins(16, 10, 16, 14)
         self._input_layout.setSpacing(6)
 
-        # Status label
         self.status_label = QLabel("")
         self.status_label.setObjectName("statusLabel")
         self._input_layout.addWidget(self.status_label)
 
-        # File chip slot (hidden until a file is attached)
         self._chip_row = QHBoxLayout()
         self._chip_row.setContentsMargins(0, 0, 0, 0)
         self._input_layout.addLayout(self._chip_row)
 
-        # Input row
         row = QHBoxLayout()
         row.setSpacing(8)
 
@@ -223,7 +208,7 @@ class ChatWidget(QWidget):
         self.input.setObjectName("messageInput")
         self.input.setPlaceholderText("Введите сообщение…")
         self.input.setFixedHeight(44)
-        self.input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # fix phantom scrollbar
+        self.input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.input.submitted.connect(self._on_send)
         self.input.textChanged.connect(self._adjust_height)
         row.addWidget(self.input, 1)
@@ -244,10 +229,32 @@ class ChatWidget(QWidget):
 
         layout.addWidget(self._input_container)
 
-    # ── File chip (input area) ────────────────────────────
+    # ── Link handler ──────────────────────────────────────
+
+    def _on_link_clicked(self, url: QUrl):
+        """
+        file:// links  → "Save As" dialog
+        http(s):// etc → system browser
+        """
+        if url.scheme() == "file":
+            abs_path = url.toLocalFile()
+            if not os.path.exists(abs_path):
+                self.status_label.setText(f"Файл не найден: {os.path.basename(abs_path)}")
+                return
+            filename = os.path.basename(abs_path)
+            dest, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)
+            if dest:
+                try:
+                    shutil.copy2(abs_path, dest)
+                    self.status_label.setText(f"Сохранено: {dest}")
+                except Exception as e:
+                    self.status_label.setText(f"Ошибка: {e}")
+        else:
+            QDesktopServices.openUrl(url)
+
+    # ── File chip ─────────────────────────────────────────
 
     def set_pending_file(self, filename: str, abs_path: str):
-        """Show a file chip above the input field."""
         self._clear_chip()
         self._pending_file = (filename, abs_path)
         chip = FileChip(filename)
@@ -261,7 +268,6 @@ class ChatWidget(QWidget):
         if self._file_chip:
             self._file_chip.setParent(None)
             self._file_chip = None
-        # clear stretch
         while self._chip_row.count():
             item = self._chip_row.takeAt(0)
             if item.widget():
@@ -272,22 +278,17 @@ class ChatWidget(QWidget):
 
     def _adjust_height(self):
         doc_h = self.input.document().size().height()
-        new_h = max(44, min(160, int(doc_h) + 20))
-        self.input.setFixedHeight(new_h)
+        self.input.setFixedHeight(max(44, min(160, int(doc_h) + 20)))
 
     def _on_send(self):
         if self._is_busy:
             self.stop_requested.emit()
             return
-        text = self.input.toPlainText().strip()
+        text    = self.input.toPlainText().strip()
         pending = self._pending_file
-
         if not text and not pending:
             return
-
         self.input.clear()
-
-        # Compose display + LLM text
         if pending:
             filename, abs_path = pending
             llm_text = f"[Файл: {filename}]\n{text}" if text else f"[Файл: {filename}]"
@@ -296,7 +297,6 @@ class ChatWidget(QWidget):
         else:
             llm_text = text
             self._append_message("user", text)
-
         self.send_message.emit(llm_text)
 
     def _on_attach(self):
@@ -325,7 +325,7 @@ class ChatWidget(QWidget):
     def set_persistent(self, is_persistent: bool):
         self.memory_btn.setVisible(is_persistent)
 
-    # ── Message display (public API) ──────────────────────
+    # ── Message display ───────────────────────────────────
 
     def clear_messages(self):
         self._messages_html = ""
@@ -334,18 +334,14 @@ class ChatWidget(QWidget):
     def load_messages(self, messages: list[dict]):
         self.clear_messages()
         for m in messages:
-            role = m["role"]
+            role    = m["role"]
             content = m["content"]
             if role == "user":
-                # Detect [Файл: name] prefix in historical messages
                 if content.startswith("[Файл: ") and "]\n" in content:
                     fname_end = content.index("]")
-                    fname = content[7:fname_end]
-                    rest = content[fname_end + 2:]
-                    self._add_user_message_with_file(fname, rest)
+                    self._add_user_message_with_file(content[7:fname_end], content[fname_end + 2:])
                 elif content.startswith("[Файл: ") and content.endswith("]"):
-                    fname = content[7:-1]
-                    self._add_user_message_with_file(fname, "")
+                    self._add_user_message_with_file(content[7:-1], "")
                 else:
                     self._append_message("user", content)
             elif role == "assistant":
@@ -360,29 +356,25 @@ class ChatWidget(QWidget):
                     pass
 
     def add_user_message(self, text: str):
-        """Used when loading history or in edge cases without file."""
         self._append_message("user", text)
 
     def add_assistant_message(self, text: str):
         self._append_message("assistant", text)
 
     def add_tool_message(self, tool_name: str, args: str, result: str):
-        display = f"{args}\n{result}"
-        self._append_tool(tool_name, display)
+        self._append_tool(tool_name, f"{args}\n{result}")
 
     def add_error_message(self, text: str):
         self._append_message("error", text)
 
     def add_file_card(self, filename: str, abs_path: str):
-        """Show a downloadable file card in the chat (after write_file)."""
-        icon = _file_icon(filename)
-        ext = filename.rsplit(".", 1)[-1].upper() if "." in filename else "FILE"
-        size_str = _file_size_str(abs_path)
-        meta = f"{ext}  {size_str}".strip()
+        icon      = _file_icon(filename)
+        ext       = filename.rsplit(".", 1)[-1].upper() if "." in filename else "FILE"
+        size_str  = _file_size_str(abs_path)
+        meta      = f"{ext}  {size_str}".strip()
         safe_name = html.escape(filename)
         safe_meta = html.escape(meta)
-        # Use file:// URL for QTextBrowser to open
-        file_url = "file:///" + abs_path.replace("\\", "/").lstrip("/")
+        file_url  = QUrl.fromLocalFile(abs_path).toString()
 
         block = (
             f'<div class="fc-wrap">'
@@ -393,8 +385,8 @@ class ChatWidget(QWidget):
             f'<div class="fc-name">{safe_name}</div>'
             f'<div class="fc-meta">{safe_meta}</div>'
             f'</td>'
-            f'<td class="fc-action-cell" width="80" align="right">'
-            f'<a href="{file_url}" class="fc-link">Открыть →</a>'
+            f'<td class="fc-action-cell" width="110" align="right">'
+            f'<a href="{file_url}" class="fc-link">&#128190; Скачать</a>'
             f'</td>'
             f'</tr>'
             f'</table>'
@@ -403,25 +395,40 @@ class ChatWidget(QWidget):
         self._messages_html += block
         self._render()
 
-    # ── Streaming ─────────────────────────────────────────
+    # ── Streaming (QTimer-buffered) ───────────────────────
 
     def begin_stream(self):
         self._streaming_text = ""
         self._streaming_base = self._messages_html
+        self._stream_buffer  = ""
+        self._stream_timer.start()
 
     def append_stream(self, chunk: str):
-        self._streaming_text += chunk
+        """Called from main thread via queued signal — only buffers, no UI."""
+        self._stream_buffer += chunk
+
+    def _flush_stream(self):
+        """QTimer slot: drains buffer → updates browser at ~25 fps."""
+        if not self._stream_buffer:
+            return
+        self._streaming_text += self._stream_buffer
+        self._stream_buffer   = ""
         escaped = html.escape(self._streaming_text).replace("\n", "<br>")
         block = (
             f'<div class="msg-wrap assistant">'
             f'<div class="bubble-assistant">{escaped}'
             f'<span class="cursor"></span></div></div>'
         )
-        self.browser.setHtml(MESSAGE_CSS + f"<body>{self._streaming_base}{block}</body>")
+        self.browser.setHtml(
+            MESSAGE_CSS + f"<body>{self._streaming_base}{block}</body>"
+        )
         self._scroll_bottom()
-        QApplication.processEvents()
 
     def end_stream(self):
+        self._stream_timer.stop()
+        if self._stream_buffer:
+            self._streaming_text += self._stream_buffer
+            self._stream_buffer   = ""
         if self._streaming_text:
             rendered = _md_to_html(self._streaming_text)
             block = (
@@ -433,29 +440,26 @@ class ChatWidget(QWidget):
         self._streaming_text = ""
         self._streaming_base = ""
 
-    # ── Private render helpers ────────────────────────────
+    # ── Private render ────────────────────────────────────
 
     def _add_user_message_with_file(self, filename: str, text: str):
-        """Render a user bubble that includes a file chip + optional text."""
-        icon = _file_icon(filename)
-        ext = filename.rsplit(".", 1)[-1].upper() if "." in filename else "FILE"
+        icon      = _file_icon(filename)
+        ext       = filename.rsplit(".", 1)[-1].upper() if "." in filename else "FILE"
         safe_name = html.escape(filename)
         text_block = (
-            f'<div class="bubble-file-text">{html.escape(text).replace(chr(10), "<br>")}</div>'
+            f'<div class="bubble-file-text">'
+            f'{html.escape(text).replace(chr(10), "<br>")}</div>'
             if text else ""
         )
         block = (
-            f'<div class="msg-wrap user">'
-            f'<div class="bubble-user">'
+            f'<div class="msg-wrap user"><div class="bubble-user">'
             f'<table class="attach-chip" cellpadding="0" cellspacing="0" border="0">'
             f'<tr>'
             f'<td class="ac-icon">{icon}</td>'
             f'<td class="ac-name">{safe_name}</td>'
             f'<td class="ac-ext">{ext}</td>'
-            f'</tr>'
-            f'</table>'
-            f'{text_block}'
-            f'</div></div>'
+            f'</tr></table>'
+            f'{text_block}</div></div>'
         )
         self._messages_html += block
         self._render()

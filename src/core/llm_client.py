@@ -109,6 +109,26 @@ TOOLS = [
                 "properties": {}
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deliver_file",
+            "description": "Show a file that already exists in the uploads directory as a download card for the user. "
+                           "Use this INSTEAD of write_file when you created a binary file (zip, image, PDF, etc.) "
+                           "via execute_command in /workspace/uploads/. "
+                           "Do NOT use write_file for binary files — it corrupts them.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File name only (e.g. 'archive.zip'), must already exist in uploads/"
+                    }
+                },
+                "required": ["path"]
+            }
+        }
     }
 ]
 
