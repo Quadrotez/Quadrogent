@@ -89,10 +89,7 @@ class MainWindow(QMainWindow):
         sb.setSpacing(4)
 
         logo = QLabel("  Quadrogent")
-        logo.setStyleSheet(
-            "font-size: 15px; font-weight: 600; color: #505050; "
-            "padding: 14px 16px 12px 16px; letter-spacing: 0.5px;"
-        )
+        logo.setObjectName("logoLabel")
         sb.addWidget(logo)
 
         new_btn = QPushButton("+ Новый чат")
@@ -129,9 +126,9 @@ class MainWindow(QMainWindow):
         chat_vl.addWidget(self.chat, 1)
 
         self.docker_log = DockerLogPanel()
-        self.docker_log.setFixedHeight(220)
+        self.docker_log.setFixedHeight(200)
         self.docker_log.hide()
-        chat_vl.addWidget(self.docker_log)
+        chat_vl.addWidget(self.docker_log, 0)
 
         splitter.addWidget(chat_container)
 

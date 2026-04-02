@@ -14,12 +14,12 @@ from PyQt5.QtGui import QTextCursor, QColor, QTextCharFormat, QFont
 
 LEVEL_CFG = {
     #  level      color       prefix
-    "info":  ("#606060", "  "),
-    "ok":    ("#4a9a5a", "✓ "),
-    "warn":  ("#a07a30", "⚠ "),
-    "error": ("#b04040", "✗ "),
-    "cmd":   ("#5080b0", "$ "),
-    "out":   ("#484848", "  "),
+    "info":  ("#6a6a7e", "  "),
+    "ok":    ("#5a9a6a", "✓ "),
+    "warn":  ("#b08a40", "⚠ "),
+    "error": ("#c05050", "✗ "),
+    "cmd":   ("#6090c0", "$ "),
+    "out":   ("#505060", "  "),
 }
 
 
@@ -51,19 +51,19 @@ class DockerLogPanel(QWidget):
         hl.setSpacing(10)
 
         dot = QLabel("●")
-        dot.setStyleSheet("color: #3a6a4a; font-size: 10px; background: transparent;")
+        dot.setStyleSheet("color: #5a7a6a; font-size: 10px; background: transparent;")
         hl.addWidget(dot)
 
         title = QLabel("Docker — инициализация контейнера")
         title.setStyleSheet(
-            "color: #707070; font-size: 12px; font-weight: 600; "
+            "color: #787888; font-size: 12px; font-weight: 600; "
             "letter-spacing: 0.3px; background: transparent;"
         )
         hl.addWidget(title, 1)
 
         self._status_lbl = QLabel("подготовка…")
         self._status_lbl.setStyleSheet(
-            "color: #404040; font-size: 11px; background: transparent;"
+            "color: #4a4a5a; font-size: 11px; background: transparent;"
         )
         hl.addWidget(self._status_lbl)
 
@@ -75,30 +75,34 @@ class DockerLogPanel(QWidget):
         self._log.setObjectName("dlpLog")
         self._log.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._log.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._log.setAcceptRichText(False)
         layout.addWidget(self._log, 1)
 
         self.setStyleSheet("""
             #dockerLogPanel {
-                background: #080808;
-                border-top: 1px solid #141414;
+                background: #08080c;
+                border-top: 1px solid #1a1a25;
             }
             #dlpHeader {
-                background: #0a0a0a;
-                border-bottom: 1px solid #141414;
+                background: #0a0a10;
+                border-bottom: 1px solid #1a1a25;
             }
             #dlpLog {
-                background: #070707;
+                background: #06060a;
                 border: none;
                 font-family: "JetBrains Mono", "Consolas", monospace;
                 font-size: 12px;
-                color: #505050;
-                padding: 10px 16px;
+                color: #5a5a6e;
+                padding: 12px 18px;
             }
             QScrollBar:vertical {
-                background: transparent; width: 4px;
+                background: transparent; width: 5px;
             }
             QScrollBar::handle:vertical {
-                background: #1e1e1e; border-radius: 2px; min-height: 20px;
+                background: #252535; border-radius: 3px; min-height: 24px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #303045;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
@@ -145,7 +149,7 @@ class DockerLogPanel(QWidget):
 
         # Timestamp (very dim)
         ts_fmt = QTextCharFormat()
-        ts_fmt.setForeground(QColor("#252525"))
+        ts_fmt.setForeground(QColor("#303040"))
         ts_fmt.setFont(QFont("JetBrains Mono, Consolas", 10))
         now = datetime.now().strftime("%H:%M:%S")
         cursor.insertText(f"{now}  ", ts_fmt)
@@ -204,7 +208,7 @@ class DockerLogPanel(QWidget):
         cursor.movePosition(QTextCursor.End)
 
         ts_fmt = QTextCharFormat()
-        ts_fmt.setForeground(QColor("#252525"))
+        ts_fmt.setForeground(QColor("#303040"))
         now = datetime.now().strftime("%H:%M:%S")
         cursor.insertText(f"{now}  ", ts_fmt)
 
