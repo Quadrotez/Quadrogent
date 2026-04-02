@@ -138,6 +138,7 @@ class LLMClient:
 
     def __init__(self, base_url: str = LM_STUDIO_URL):
         self.base_url = base_url
+        self.model: str | None = None  # None = let LM Studio pick the loaded model
         self.session = requests.Session()
 
     def check_connection(self) -> bool:
@@ -162,11 +163,13 @@ class LLMClient:
         stream: bool = True,
         temperature: float = 0.7,
     ) -> dict | Generator:
-        payload = {
+        payload: dict = {
             "messages": messages,
             "temperature": temperature,
             "stream": stream,
         }
+        if self.model:
+            payload["model"] = self.model
         if use_tools:
             payload["tools"] = TOOLS
             payload["tool_choice"] = "auto"

@@ -3,11 +3,12 @@ import json
 import os
 import re
 import shutil
+from datetime import datetime
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
     QTextEdit, QPushButton, QLabel, QFileDialog,
-    QSizePolicy,
+    QSizePolicy, QMenu, QComboBox,
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices, QKeyEvent
@@ -91,6 +92,10 @@ def _file_size_str(path: str) -> str:
 class MessageInput(QTextEdit):
     submitted = pyqtSignal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(False)  # parent ChatWidget handles drops
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             if event.modifiers() & Qt.ShiftModifier:
@@ -138,6 +143,107 @@ class FileChip(QWidget):
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
 
+# ── ModelSelector ─────────────────────────────────────────────────────────────
+
+class ModelSelector(QWidget):
+    """Shows loaded models (light) and available-but-unloaded models (dim)."""
+    model_changed  = pyqtSignal(str)
+    refresh_clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        lbl = QLabel("Модель:")
+        lbl.setStyleSheet("color: #444; font-size: 12px; background: transparent;")
+        layout.addWidget(lbl)
+
+        self.combo = QComboBox()
+        self.combo.setObjectName("modelCombo")
+        self.combo.setFixedHeight(28)
+        self.combo.setMinimumWidth(200)
+        self.combo.currentIndexChanged.connect(self._on_changed)
+        layout.addWidget(self.combo)
+
+        self.refresh_btn = QPushButton("↻")
+        self.refresh_btn.setObjectName("modelRefreshBtn")
+        self.refresh_btn.setFixedSize(28, 28)
+        self.refresh_btn.setToolTip("Обновить список моделей")
+        self.refresh_btn.clicked.connect(self.refresh_clicked.emit)
+        layout.addWidget(self.refresh_btn)
+
+        self._loaded: list[str] = []
+        self._current: str = ""
+        self._updating = False
+
+    def set_models(self, loaded: list[str], available: list[str]):
+        """
+        loaded    — модели, уже загруженные в LM Studio (светло-серые)
+        available — все модели на диске, включая незагруженные (тёмные)
+        """
+        self._loaded = loaded
+        self._updating = True
+        prev = self._current
+
+        self.combo.clear()
+
+        # Loaded first, then unloaded
+        sections: list[tuple[str, bool]] = []
+        for m in loaded:
+            sections.append((m, True))
+        for m in available:
+            if m not in loaded:
+                sections.append((m, False))
+
+        if not sections:
+            self.combo.addItem("(нет моделей)")
+            self._updating = False
+            return
+
+        target_idx = 0
+        for i, (model_id, is_loaded) in enumerate(sections):
+            icon = "● " if is_loaded else "○ "
+            self.combo.addItem(icon + model_id, userData=model_id)
+            # Style loaded items brighter
+            item = self.combo.model().item(i)
+            if item:
+                if is_loaded:
+                    item.setForeground(__import__('PyQt5.QtGui', fromlist=['QColor']).QColor("#c8c8c8"))
+                else:
+                    item.setForeground(__import__('PyQt5.QtGui', fromlist=['QColor']).QColor("#454545"))
+            if model_id == prev:
+                target_idx = i
+            elif is_loaded and not prev:
+                target_idx = i
+
+        self.combo.setCurrentIndex(target_idx)
+        if self.combo.count() > 0:
+            self._current = self.combo.itemData(target_idx) or ""
+        self._updating = False
+
+    def current_model(self) -> str:
+        return self._current
+
+    def set_current_model(self, model_id: str):
+        self._current = model_id
+        self._updating = True
+        for i in range(self.combo.count()):
+            if self.combo.itemData(i) == model_id:
+                self.combo.setCurrentIndex(i)
+                break
+        self._updating = False
+
+    def _on_changed(self, idx: int):
+        if self._updating:
+            return
+        model_id = self.combo.itemData(idx)
+        if model_id and model_id != self._current:
+            self._current = model_id
+            self.model_changed.emit(model_id)
+
+
 # ── ChatWidget ────────────────────────────────────────────────────────────────
 
 class ChatWidget(QWidget):
@@ -145,8 +251,11 @@ class ChatWidget(QWidget):
     attach_file    = pyqtSignal(str)
     save_memory    = pyqtSignal()
     stop_requested = pyqtSignal()
+    export_chat    = pyqtSignal(str)   # "html" | "txt" | "json"
+    model_changed  = pyqtSignal(str)
+    model_refresh  = pyqtSignal()
 
-    _STREAM_INTERVAL_MS = 40   # ~25 fps streaming updates
+    _STREAM_INTERVAL_MS = 40
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -158,11 +267,14 @@ class ChatWidget(QWidget):
         self._stream_buffer  = ""
         self._pending_file: tuple[str, str] | None = None
         self._file_chip: FileChip | None = None
+        self._raw_messages: list[dict] = []
+        self._chat_title: str = "Чат"
 
         self._stream_timer = QTimer(self)
         self._stream_timer.setInterval(self._STREAM_INTERVAL_MS)
         self._stream_timer.timeout.connect(self._flush_stream)
 
+        self.setAcceptDrops(True)
         self._build()
 
     # ── Build ─────────────────────────────────────────────
@@ -172,14 +284,42 @@ class ChatWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # ── Top bar ──────────────────────────────────────
+        top_bar = QWidget()
+        top_bar.setObjectName("chatTopBar")
+        top_bar.setFixedHeight(44)
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(16, 6, 12, 6)
+        top_layout.setSpacing(8)
+
+        self.model_selector = ModelSelector()
+        self.model_selector.model_changed.connect(self.model_changed.emit)
+        self.model_selector.refresh_clicked.connect(self.model_refresh.emit)
+        top_layout.addWidget(self.model_selector)
+        top_layout.addStretch()
+
+        self._export_btn = QPushButton("↑ Экспорт")
+        self._export_btn.setObjectName("exportBtn")
+        self._export_btn.setFixedHeight(28)
+        self._export_btn.setToolTip("Экспортировать чат")
+        self._export_btn.clicked.connect(self._show_export_menu)
+        top_layout.addWidget(self._export_btn)
+
+        layout.addWidget(top_bar)
+
+        # ── Chat browser ─────────────────────────────────
         self.browser = QTextBrowser()
         self.browser.setObjectName("chatBrowser")
         self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
         self.browser.anchorClicked.connect(self._on_link_clicked)
+        # Fix: proper scroll policy so wheel works naturally
+        self.browser.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.browser.setHtml(MESSAGE_CSS + "<body></body>")
         layout.addWidget(self.browser, 1)
 
+        # ── Input area ───────────────────────────────────
         self._input_container = QWidget()
         self._input_container.setObjectName("inputArea")
         self._input_layout = QVBoxLayout(self._input_container)
@@ -206,7 +346,7 @@ class ChatWidget(QWidget):
 
         self.input = MessageInput()
         self.input.setObjectName("messageInput")
-        self.input.setPlaceholderText("Введите сообщение…")
+        self.input.setPlaceholderText("Введите сообщение или перетащите файл…")
         self.input.setFixedHeight(44)
         self.input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.input.submitted.connect(self._on_send)
@@ -229,13 +369,70 @@ class ChatWidget(QWidget):
 
         layout.addWidget(self._input_container)
 
+    # ── Drag & Drop ───────────────────────────────────────
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls and urls[0].isLocalFile() and os.path.isfile(urls[0].toLocalFile()):
+                event.acceptProposedAction()
+                self._set_drag_hint(True)
+                return
+        event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._set_drag_hint(False)
+
+    def dropEvent(self, event):
+        self._set_drag_hint(False)
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                path = urls[0].toLocalFile()
+                if os.path.isfile(path):
+                    event.acceptProposedAction()
+                    self.attach_file.emit(path)
+                    return
+        event.ignore()
+
+    def _set_drag_hint(self, active: bool):
+        if active:
+            self.status_label.setText("📎 Отпустите, чтобы прикрепить файл")
+            self.status_label.setStyleSheet(
+                "color: #5599dd; font-size: 12px; padding: 2px 4px;"
+            )
+            self._input_container.setStyleSheet(
+                "#inputArea { border-top: 1px solid #3366aa; background: #0d1520; }"
+            )
+        else:
+            self.status_label.setText("")
+            self.status_label.setStyleSheet("")
+            self._input_container.setStyleSheet("")
+
+    # ── Export ────────────────────────────────────────────
+
+    def _show_export_menu(self):
+        menu = QMenu(self)
+        menu.addAction("🌐  Красивый HTML", lambda: self.export_chat.emit("html"))
+        menu.addAction("📄  Текст (TXT)",    lambda: self.export_chat.emit("txt"))
+        menu.addAction("📋  Данные (JSON)",  lambda: self.export_chat.emit("json"))
+        menu.exec_(self._export_btn.mapToGlobal(
+            self._export_btn.rect().bottomLeft()
+        ))
+
+    def set_chat_title(self, title: str):
+        self._chat_title = title
+
+    def get_export_data(self) -> dict:
+        return {
+            "title": self._chat_title,
+            "messages": list(self._raw_messages),
+            "exported_at": datetime.now().isoformat(),
+        }
+
     # ── Link handler ──────────────────────────────────────
 
     def _on_link_clicked(self, url: QUrl):
-        """
-        file:// links  → "Save As" dialog
-        http(s):// etc → system browser
-        """
         if url.scheme() == "file":
             abs_path = url.toLocalFile()
             if not os.path.exists(abs_path):
@@ -329,23 +526,31 @@ class ChatWidget(QWidget):
 
     def clear_messages(self):
         self._messages_html = ""
-        self._render()
+        self._raw_messages = []
+        self._render(no_scroll=True)
 
     def load_messages(self, messages: list[dict]):
         self.clear_messages()
         for m in messages:
             role    = m["role"]
             content = m["content"]
+            ts      = m.get("ts", "")
             if role == "user":
                 if content.startswith("[Файл: ") and "]\n" in content:
                     fname_end = content.index("]")
-                    self._add_user_message_with_file(content[7:fname_end], content[fname_end + 2:])
+                    self._add_user_message_with_file(
+                        content[7:fname_end], content[fname_end + 2:], ts=ts, _record=False
+                    )
+                    self._raw_messages.append({"role": "user", "content": content, "ts": ts})
                 elif content.startswith("[Файл: ") and content.endswith("]"):
-                    self._add_user_message_with_file(content[7:-1], "")
+                    self._add_user_message_with_file(content[7:-1], "", ts=ts, _record=False)
+                    self._raw_messages.append({"role": "user", "content": content, "ts": ts})
                 else:
-                    self._append_message("user", content)
+                    self._append_message("user", content, ts=ts, _record=False)
+                    self._raw_messages.append({"role": "user", "content": content, "ts": ts})
             elif role == "assistant":
-                self._append_message("assistant", content)
+                self._append_message("assistant", content, ts=ts, _record=False)
+                self._raw_messages.append({"role": "assistant", "content": content, "ts": ts})
             elif role == "tool":
                 self._append_tool(m.get("tool", "tool"), content)
             elif role == "file_card":
@@ -354,6 +559,8 @@ class ChatWidget(QWidget):
                     self.add_file_card(data["filename"], data["abs_path"])
                 except Exception:
                     pass
+        # Scroll to bottom after a tick (QTextBrowser needs time to layout)
+        QTimer.singleShot(60, self._scroll_bottom)
 
     def add_user_message(self, text: str):
         self._append_message("user", text)
@@ -395,7 +602,7 @@ class ChatWidget(QWidget):
         self._messages_html += block
         self._render()
 
-    # ── Streaming (QTimer-buffered) ───────────────────────
+    # ── Streaming ─────────────────────────────────────────
 
     def begin_stream(self):
         self._streaming_text = ""
@@ -404,11 +611,9 @@ class ChatWidget(QWidget):
         self._stream_timer.start()
 
     def append_stream(self, chunk: str):
-        """Called from main thread via queued signal — only buffers, no UI."""
         self._stream_buffer += chunk
 
     def _flush_stream(self):
-        """QTimer slot: drains buffer → updates browser at ~25 fps."""
         if not self._stream_buffer:
             return
         self._streaming_text += self._stream_buffer
@@ -436,13 +641,18 @@ class ChatWidget(QWidget):
                 f'<div class="bubble-assistant">{rendered}</div></div>'
             )
             self._messages_html = self._streaming_base + block
+            self._raw_messages.append({
+                "role": "assistant",
+                "content": self._streaming_text,
+                "ts": datetime.now().isoformat(),
+            })
             self._render()
         self._streaming_text = ""
         self._streaming_base = ""
 
     # ── Private render ────────────────────────────────────
 
-    def _add_user_message_with_file(self, filename: str, text: str):
+    def _add_user_message_with_file(self, filename: str, text: str, ts: str = "", _record: bool = True):
         icon      = _file_icon(filename)
         ext       = filename.rsplit(".", 1)[-1].upper() if "." in filename else "FILE"
         safe_name = html.escape(filename)
@@ -462,15 +672,20 @@ class ChatWidget(QWidget):
             f'{text_block}</div></div>'
         )
         self._messages_html += block
+        if _record:
+            raw = f"[Файл: {filename}]\n{text}" if text else f"[Файл: {filename}]"
+            self._raw_messages.append({"role": "user", "content": raw, "ts": ts or datetime.now().isoformat()})
         self._render()
 
-    def _append_message(self, css_class: str, content: str):
+    def _append_message(self, css_class: str, content: str, ts: str = "", _record: bool = True):
         if css_class == "user":
             escaped = html.escape(content).replace("\n", "<br>")
             block = (
                 f'<div class="msg-wrap user">'
                 f'<div class="bubble-user">{escaped}</div></div>'
             )
+            if _record:
+                self._raw_messages.append({"role": "user", "content": content, "ts": ts or datetime.now().isoformat()})
         elif css_class == "error":
             escaped = html.escape(content).replace("\n", "<br>")
             block = (
@@ -483,6 +698,8 @@ class ChatWidget(QWidget):
                 f'<div class="msg-wrap assistant">'
                 f'<div class="bubble-assistant">{rendered}</div></div>'
             )
+            if _record:
+                self._raw_messages.append({"role": "assistant", "content": content, "ts": ts or datetime.now().isoformat()})
         self._messages_html += block
         self._render()
 
@@ -496,11 +713,11 @@ class ChatWidget(QWidget):
         self._messages_html += block
         self._render()
 
-    def _render(self):
+    def _render(self, no_scroll: bool = False):
         self.browser.setHtml(MESSAGE_CSS + f"<body>{self._messages_html}</body>")
-        self._scroll_bottom()
+        if not no_scroll:
+            self._scroll_bottom()
 
     def _scroll_bottom(self):
-        self.browser.verticalScrollBar().setValue(
-            self.browser.verticalScrollBar().maximum()
-        )
+        sb = self.browser.verticalScrollBar()
+        sb.setValue(sb.maximum())

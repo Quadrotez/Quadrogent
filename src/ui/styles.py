@@ -256,6 +256,66 @@ QTabWidget::pane { border: 1px solid #1e1e1e; background: #0f0f0f; }
 QTabBar::tab { background: transparent; color: #555555; padding: 8px 20px; border-bottom: 2px solid transparent; font-size: 13px; }
 QTabBar::tab:selected { color: #d0d0d0; border-bottom: 2px solid #d0d0d0; }
 QTabBar::tab:hover:!selected { color: #888888; }
+
+/* Chat top bar */
+#chatTopBar {
+    background-color: #080808;
+    border-bottom: 1px solid #181818;
+}
+
+/* Model selector combo */
+#modelCombo {
+    background-color: #0e0e0e;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
+    padding: 3px 8px;
+    color: #555555;
+    font-size: 12px;
+    min-width: 180px;
+}
+#modelCombo:hover {
+    border-color: #2a2a2a;
+    color: #888888;
+}
+#modelCombo::drop-down { border: none; width: 18px; }
+#modelCombo QAbstractItemView {
+    background-color: #0e0e0e;
+    border: 1px solid #1e1e1e;
+    color: #888888;
+    selection-background-color: #1a1a1a;
+    outline: none;
+    font-size: 12px;
+}
+
+/* Model refresh button */
+#modelRefreshBtn {
+    background-color: transparent;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
+    color: #383838;
+    font-size: 14px;
+    padding: 0;
+}
+#modelRefreshBtn:hover {
+    background-color: #141414;
+    border-color: #2a2a2a;
+    color: #666666;
+}
+
+/* Export button */
+#exportBtn {
+    background-color: transparent;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
+    color: #383838;
+    font-size: 12px;
+    padding: 4px 10px;
+}
+#exportBtn:hover {
+    background-color: #141414;
+    border-color: #2a2a2a;
+    color: #666666;
+}
 """
 
 

@@ -1,11 +1,14 @@
+import json
 import os
 import shutil
+from datetime import datetime
+
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QListWidget, QListWidgetItem, QSplitter,
-    QLabel, QMessageBox, QMenu,
+    QLabel, QMessageBox, QMenu, QFileDialog,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtCore import QUrl
 
@@ -22,7 +25,7 @@ class AgentWorker(QThread):
     stream_start_signal = pyqtSignal()
     stream_delta_signal = pyqtSignal(str)
     stream_end_signal   = pyqtSignal()
-    file_ready_signal   = pyqtSignal(str, str)   # filename, abs_path
+    file_ready_signal   = pyqtSignal(str, str)
     finished_signal     = pyqtSignal()
 
     def __init__(self, agent: Agent, chat_id: int, text: str, mode: str):
@@ -58,9 +61,13 @@ class MainWindow(QMainWindow):
 
         self._build()
         self._load_chats()
+        self._refresh_models()
 
         if not self.agent.llm.check_connection():
             self.chat.status_label.setText("⚠ LM Studio не найден (localhost:1234)")
+
+        # Bootstrap Docker container in background so UI stays responsive
+        self._init_docker_async()
 
     # ── Layout ────────────────────────────────────────────
 
@@ -110,11 +117,39 @@ class MainWindow(QMainWindow):
         self.chat.attach_file.connect(self._on_attach)
         self.chat.save_memory.connect(self._on_save_memory)
         self.chat.stop_requested.connect(self._on_stop)
+        self.chat.export_chat.connect(self._on_export_chat)
+        self.chat.model_changed.connect(self._on_model_changed)
+        self.chat.model_refresh.connect(self._refresh_models)
         splitter.addWidget(self.chat)
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         ml.addWidget(splitter)
+
+    # ── Docker init ───────────────────────────────────────
+
+    def _init_docker_async(self):
+        """Start container bootstrap in a background thread; show progress in status bar."""
+        import threading
+
+        def _run():
+            from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
+            def _set_status(msg):
+                QMetaObject.invokeMethod(
+                    self.chat.status_label, "setText",
+                    _Qt.QueuedConnection, Q_ARG(str, msg)
+                )
+
+            _set_status("🐳 Подготовка Docker-контейнера…")
+            ok = self.agent.docker.ensure_container()
+            if ok:
+                _set_status("🐳 Контейнер готов")
+                QTimer.singleShot(3000, lambda: self.chat.status_label.setText(""))
+            else:
+                _set_status("⚠ Docker недоступен — выполнение команд невозможно")
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
     # ── Chat list ─────────────────────────────────────────
 
@@ -139,6 +174,8 @@ class MainWindow(QMainWindow):
         chat_id = item.data(Qt.UserRole)
         self.current_chat_id = chat_id
         chat_data = self.db.get_chat(chat_id)
+        title = chat_data.get("title", "Чат") if chat_data else "Чат"
+        self.chat.set_chat_title(title)
         self.chat.load_messages(self.db.get_messages(chat_id))
         self.chat.set_persistent(bool(chat_data.get("persistent", 0)))
 
@@ -148,11 +185,15 @@ class MainWindow(QMainWindow):
             return
         chat_id = item.data(Qt.UserRole)
         menu = QMenu(self)
-        s_act = menu.addAction("Настройки чата")
-        d_act = menu.addAction("Удалить чат")
+        s_act   = menu.addAction("Настройки чата")
+        exp_act = menu.addAction("Экспортировать чат…")
+        menu.addSeparator()
+        d_act   = menu.addAction("Удалить чат")
         action = menu.exec_(self.chat_list.mapToGlobal(pos))
         if action == s_act:
             self._open_chat_settings(chat_id)
+        elif action == exp_act:
+            self._export_chat_by_id(chat_id)
         elif action == d_act:
             self._delete_chat(chat_id)
 
@@ -180,20 +221,47 @@ class MainWindow(QMainWindow):
                 self.chat.clear_messages()
             self._load_chats()
 
+    # ── Model switcher ────────────────────────────────────
+
+    def _refresh_models(self):
+        """Ask LM Studio for loaded models and update the selector."""
+        loaded = self.agent.llm.get_models()        # currently loaded/running
+        # LM Studio /v1/models returns only currently-loaded models.
+        # We store previously-seen model IDs in settings so the list grows.
+        seen_raw = self.db.get_setting("seen_models", "")
+        seen: list[str] = json.loads(seen_raw) if seen_raw else []
+        for m in loaded:
+            if m not in seen:
+                seen.append(m)
+        self.db.set_setting("seen_models", json.dumps(seen))
+
+        self.chat.model_selector.set_models(loaded, seen)
+
+        # Restore saved model choice
+        saved_model = self.db.get_setting("current_model", "")
+        if saved_model:
+            self.chat.model_selector.set_current_model(saved_model)
+            self.agent.llm.model = saved_model
+        elif loaded:
+            self.agent.llm.model = loaded[0]
+
+    def _on_model_changed(self, model_id: str):
+        self.agent.llm.model = model_id
+        self.db.set_setting("current_model", model_id)
+
     # ── Messages ──────────────────────────────────────────
 
     def _on_send(self, llm_text: str):
-        """Called after ChatWidget has already added the user bubble to display."""
         if not self.current_chat_id:
             self._new_chat()
 
         chat_data = self.db.get_chat(self.current_chat_id)
         mode = chat_data.get("mode", "auto") if chat_data else "auto"
 
-        # Update title from first message
         if not self.db.get_messages(self.current_chat_id):
             title = llm_text[:50] + ("…" if len(llm_text) > 50 else "")
             self.db.update_chat(self.current_chat_id, title=title)
+            self.chat.set_chat_title(title)
             self._load_chats()
 
         self.chat.set_busy(True)
@@ -230,10 +298,8 @@ class MainWindow(QMainWindow):
             self.agent.stop()
 
     def _on_file_ready(self, filename: str, abs_path: str):
-        """Show a file card in chat and save it to DB so it survives reload."""
         self.chat.add_file_card(filename, abs_path)
         if self.current_chat_id:
-            import json
             self.db.add_message(
                 self.current_chat_id,
                 "file_card",
@@ -241,7 +307,6 @@ class MainWindow(QMainWindow):
             )
 
     def _on_attach(self, filepath: str):
-        """Copy file to uploads, show chip in input area."""
         if not self.current_chat_id:
             self._new_chat()
 
@@ -267,6 +332,194 @@ class MainWindow(QMainWindow):
             f"Сохранено: {summary[:60]}…" if summary else "Не удалось сохранить"
         )
 
+    # ── Export ────────────────────────────────────────────
+
+    def _on_export_chat(self, fmt: str):
+        """Called from ChatWidget export button."""
+        data = self.chat.get_export_data()
+        self._do_export(data, fmt)
+
+    def _export_chat_by_id(self, chat_id: int):
+        """Called from sidebar context menu."""
+        chat_data = self.db.get_chat(chat_id)
+        messages  = self.db.get_messages(chat_id)
+        raw = [
+            {"role": m["role"], "content": m["content"], "ts": m.get("ts", "")}
+            for m in messages
+            if m["role"] in ("user", "assistant")
+        ]
+        data = {
+            "title": chat_data.get("title", "Чат") if chat_data else "Чат",
+            "messages": raw,
+            "exported_at": datetime.now().isoformat(),
+        }
+        # Ask format via small menu
+        menu = QMenu(self)
+        menu.addAction("🌐  HTML", lambda: self._do_export(data, "html"))
+        menu.addAction("📄  TXT",  lambda: self._do_export(data, "txt"))
+        menu.addAction("📋  JSON", lambda: self._do_export(data, "json"))
+        cursor = self.chat_list.mapToGlobal(self.chat_list.rect().center())
+        menu.exec_(cursor)
+
+    def _do_export(self, data: dict, fmt: str):
+        title    = data["title"]
+        messages = data["messages"]
+        exported = data.get("exported_at", "")
+        safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "chat"
+
+        ext_map = {"html": ".html", "txt": ".txt", "json": ".json"}
+        ext = ext_map.get(fmt, ".txt")
+        default_name = f"{safe_title}{ext}"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Экспорт чата", default_name,
+            {"html": "HTML (*.html)", "txt": "Текст (*.txt)", "json": "JSON (*.json)"}.get(fmt, "Все файлы (*)")
+        )
+        if not path:
+            return
+
+        try:
+            if fmt == "json":
+                content = json.dumps(data, ensure_ascii=False, indent=2)
+            elif fmt == "txt":
+                content = self._export_txt(title, messages, exported)
+            else:
+                content = self._export_html(title, messages, exported)
+
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            self.chat.status_label.setText(f"Экспортировано: {os.path.basename(path)}")
+            QTimer.singleShot(4000, lambda: self.chat.status_label.setText(""))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка экспорта", str(e))
+
+    def _export_txt(self, title: str, messages: list[dict], exported: str) -> str:
+        lines = [f"=== {title} ===", f"Экспортировано: {exported}", ""]
+        for m in messages:
+            role = "Вы" if m["role"] == "user" else "Агент"
+            ts   = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
+            header = f"[{role}]" + (f"  {ts}" if ts else "")
+            lines.append(header)
+            lines.append(m["content"])
+            lines.append("")
+        return "\n".join(lines)
+
+    def _export_html(self, title: str, messages: list[dict], exported: str) -> str:
+        from src.ui.chat_widget import _md_to_html
+        import html as htmllib
+
+        msg_html = ""
+        for m in messages:
+            role    = m["role"]
+            content = m["content"]
+            ts      = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
+            ts_span = f'<span class="ts">{htmllib.escape(ts)}</span>' if ts else ""
+
+            if role == "user":
+                escaped = htmllib.escape(content).replace("\n", "<br>")
+                msg_html += (
+                    f'<div class="msg user">'
+                    f'<div class="bubble user-bubble">{escaped}</div>'
+                    f'{ts_span}</div>\n'
+                )
+            else:
+                rendered = _md_to_html(content)
+                msg_html += (
+                    f'<div class="msg assistant">'
+                    f'<div class="label">◈ Агент</div>'
+                    f'<div class="bubble asst-bubble">{rendered}</div>'
+                    f'{ts_span}</div>\n'
+                )
+
+        safe_title = htmllib.escape(title)
+        safe_exported = htmllib.escape(exported[:19].replace("T", " "))
+
+        return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{safe_title}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    background: #0f0f0f; color: #c8c8c8;
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.7;
+    max-width: 820px; margin: 0 auto; padding: 40px 24px 80px;
+  }}
+  header {{ border-bottom: 1px solid #1e1e1e; padding-bottom: 20px; margin-bottom: 32px; }}
+  header h1 {{ font-size: 22px; font-weight: 600; color: #e0e0e0; }}
+  header .meta {{ color: #444; font-size: 12px; margin-top: 6px; }}
+  .msg {{ margin: 18px 0; }}
+  .msg.user {{ display: flex; flex-direction: column; align-items: flex-end; }}
+  .msg.assistant {{ display: flex; flex-direction: column; align-items: flex-start; }}
+  .bubble {{
+    border-radius: 16px; padding: 12px 17px;
+    max-width: 78%; word-wrap: break-word;
+  }}
+  .user-bubble {{
+    background: #1c1c1c; border: 1px solid #282828;
+    border-radius: 16px 16px 4px 16px; color: #ececec;
+  }}
+  .asst-bubble {{
+    background: transparent; color: #c0c0c0;
+    padding: 0; max-width: 90%;
+  }}
+  .label {{ font-size: 11px; color: #383838; margin-bottom: 6px;
+            letter-spacing: 0.5px; text-transform: uppercase; }}
+  .ts {{ font-size: 10px; color: #303030; margin-top: 5px; }}
+  h1,h2,h3,h4,h5,h6 {{ color: #e0e0e0; font-weight: 600; margin: 14px 0 5px; }}
+  h1 {{ font-size: 20px; }} h2 {{ font-size: 17px; }} h3 {{ font-size: 15px; }}
+  strong {{ color: #e8e8e8; }}
+  em {{ color: #b0b0b0; font-style: italic; }}
+  a {{ color: #5599dd; text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  code {{
+    background: #181818; border: 1px solid #242424;
+    padding: 1px 5px; border-radius: 4px;
+    font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; color: #b0b0b0;
+  }}
+  .code-block {{
+    margin: 10px 0; border-radius: 8px;
+    overflow: hidden; border: 1px solid #1e1e1e;
+  }}
+  .code-lang {{
+    display: block; background: #0e0e0e; color: #444; font-size: 10px;
+    padding: 4px 12px; letter-spacing: 0.5px; font-family: monospace;
+    text-transform: uppercase; border-bottom: 1px solid #1a1a1a;
+  }}
+  .code-block pre {{
+    background: #0b0b0b; padding: 12px 14px; margin: 0;
+  }}
+  .code-block pre code {{
+    background: none; border: none; padding: 0; color: #909090;
+  }}
+  pre {{
+    background: #0b0b0b; border: 1px solid #1c1c1c;
+    padding: 12px 14px; border-radius: 8px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    color: #888; margin: 8px 0; white-space: pre-wrap;
+  }}
+  ul, ol {{ padding-left: 22px; margin: 6px 0; }}
+  li {{ margin: 3px 0; color: #c0c0c0; }}
+  hr {{ border: none; border-top: 1px solid #252525; margin: 12px 0; }}
+  .blockquote {{
+    border-left: 3px solid #333; padding: 4px 12px;
+    color: #888; margin: 6px 0; font-style: italic;
+  }}
+</style>
+</head>
+<body>
+<header>
+  <h1>◈ {safe_title}</h1>
+  <div class="meta">Экспортировано {safe_exported} · Quadrogent</div>
+</header>
+{msg_html}
+</body>
+</html>"""
+
     # ── Settings ──────────────────────────────────────────
 
     def _open_settings(self):
@@ -274,6 +527,8 @@ class MainWindow(QMainWindow):
         if dlg.exec_():
             url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
             self.agent.llm.base_url = url
+            # Refresh models after settings change
+            QTimer.singleShot(200, self._refresh_models)
 
     def closeEvent(self, event):
         if self.worker:
