@@ -894,7 +894,13 @@ class ChatWidget(QWidget):
                 self._append_message("assistant", content, ts=ts, _record=False)
                 self._raw_messages.append({"role": "assistant", "content": content, "ts": ts})
             elif role == "tool":
-                self._append_tool(m.get("tool", "tool"), content)
+                self._append_tool(m.get("tool", "tool"), content, ts=ts, _record=False)
+                self._raw_messages.append({
+                    "role": "tool",
+                    "tool": m.get("tool", "tool"),
+                    "content": content,
+                    "ts": ts,
+                })
             elif role == "file_card":
                 try:
                     data = json.loads(content)
@@ -1004,11 +1010,18 @@ class ChatWidget(QWidget):
                 self._raw_messages.append({"role": "assistant", "content": content, "ts": ts or datetime.now().isoformat()})
         self._render()
 
-    def _append_tool(self, tool_name: str, content: str):
+    def _append_tool(self, tool_name: str, content: str, ts: str = "", _record: bool = True):
         ec_match = re.search(r'\[exit code:\s*(-?\d+)\]', content)
         exit_code = int(ec_match.group(1)) if ec_match else None
         body = re.sub(r'^\[exit code:\s*-?\d+\]\n?', '', content).strip()
         self._messages_html += _tool_row(tool_name, exit_code, body)
+        if _record:
+            self._raw_messages.append({
+                "role": "tool",
+                "tool": tool_name,
+                "content": content,
+                "ts": ts or datetime.now().isoformat(),
+            })
         self._render()
 
     def _render(self, no_scroll: bool = False):

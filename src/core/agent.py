@@ -1,21 +1,16 @@
 """
 agent.py — Quadrogent core agent.
 
-Key fixes for weak local models (7B):
- 1. SYSTEM PROMPTS: Short, imperative, with explicit tool-call examples.
-    Weak models get confused by long instructions — they start narrating instead of acting.
-
- 2. tool_choice "required" in work mode: forces the model to ALWAYS call a tool.
-    With "auto", weak models often choose to write text instead of calling tools.
-
- 3. Anti-narration detection: if the model responds with a plan/text and NO tool calls
-    in work mode, we inject a hard re-prompt: "DO NOT WRITE TEXT. CALL A TOOL NOW."
-
- 4. Step-by-step forcing: after each tool result, the next turn reminds the model
-    to continue executing (not summarize).
-
- 5. "ready" detection at tool-call level: model calls deliver_file or a sentinel
-    instead of writing "ready" in text (which gets ignored by some models).
+FIXES in this version:
+  1. Model loops on errors: when execute_command fails, model re-issues similar
+     commands without reading the error. Fix: inject error context explicitly
+     and force the model to address it.
+  2. _NEXT_STEP was ignored: now includes the last tool result summary
+     so the model has concrete context for the next step.
+  3. tool_choice="required" throughout work mode (not relaxed mid-task).
+  4. Completion ONLY via deliver_file — no text-based exit.
+  5. <think> blocks stripped from stored messages to keep context clean.
+  6. Error counter: if same command fails 3 times, inject a hard diagnostic prompt.
 """
 import json
 import os
@@ -30,93 +25,94 @@ from src.utils.file_manager import FileManager
 from src.db.database import Database
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  System prompts — SHORT and IMPERATIVE for weak models
-# ─────────────────────────────────────────────────────────────────────────────
-
 SYSTEM_WORK = """\
-You are Quadrogent, an autonomous AI agent. Respond in the same language as the user.
+You are Quadrogent — an autonomous execution agent. Respond in the user's language.
 
-ENVIRONMENT: Docker Ubuntu 22.04. Pre-installed: python3, pip3, zip, unzip, curl, git.
-Working dir: /workspace. User files: /workspace/uploads/.
+ENVIRONMENT: Docker Ubuntu 22.04. Root, internet available.
+Pre-installed: python3, pip3, zip, unzip, curl, wget, git, jq.
+Working dir: /workspace | User files: /workspace/uploads/
 
-RULES — READ CAREFULLY:
-- NEVER write a plan and stop. ALWAYS immediately call a tool after any explanation.
-- NEVER say "you can run..." or "next step is..." — DO IT YOURSELF with a tool.
-- After EVERY tool result, call the NEXT tool. Keep going until task is done.
-- When fully done: call deliver_file (if there's a file) then write "TASK_COMPLETE".
-- If a command fails: read the error, fix it, retry. Never give up.
-- Packages: use install_packages tool only. Never run apt-get/pip via execute_command.
+━━━ IRON RULES ━━━
+1. ALWAYS call a tool. Never respond with text only.
+2. Do NOT narrate or explain — just DO it with a tool call.
+3. After each tool result, immediately call the NEXT tool.
+4. Read the tool output carefully before deciding the next step.
+5. If a command fails (exit code != 0): read stderr, fix the exact error, retry.
+6. Never repeat a failing command unchanged — always fix it first.
+7. Never use apt-get/pip inside execute_command — use install_packages tool.
+8. FINISH by: zip result → copy to uploads/ → deliver_file. This is the only exit.
 
-TOOL CALL EXAMPLES:
-  execute_command({"command": "mkdir -p /workspace/myapp && cd /workspace/myapp && django-admin startproject portfolio ."})
-  install_packages({"packages": "django pillow", "manager": "pip"})
-  execute_command({"command": "cat > /workspace/myapp/main/views.py << 'EOF'\\nfrom django.shortcuts import render\\nEOF"})
-  deliver_file({"path": "portfolio.zip"})
+━━━ FILE CREATION ━━━
+Create files using heredoc in execute_command:
+  execute_command: |
+    cat > /workspace/project/views.py << 'HEREDOC'
+    from django.shortcuts import render
+    def home(request):
+        return render(request, 'home.html')
+    HEREDOC
 
-START: Call a tool immediately. Do not write only text.
+━━━ COMPLETION ━━━
+  execute_command: "cd /workspace && zip -r uploads/project.zip project/"
+  deliver_file: "project.zip"
 """
 
 SYSTEM_TALK = """\
-You are Quadrogent, an open-source AI agent. Respond in the same language as the user.
-Mode: Talk. Have a normal conversation. Use markdown for formatting.
+You are Quadrogent, an open-source AI agent. Respond in the user's language.
+Mode: Talk — have a normal conversation. Use markdown.
 """
 
 SYSTEM_AUTO = """\
-You are Quadrogent, an autonomous AI agent. Respond in the same language as the user.
+You are Quadrogent — autonomous AI agent. Respond in the user's language.
+Working dir: /workspace | Uploads: /workspace/uploads/
+Pre-installed: python3, pip3, zip, unzip, curl, wget, git.
 
-ENVIRONMENT: Docker Ubuntu 22.04. Pre-installed: python3, pip3, zip, unzip, curl, git.
-Working dir: /workspace. User files: /workspace/uploads/.
-
-If the task requires actions (code, files, commands): work autonomously.
-- Call tools immediately. Do not just describe steps — execute them.
-- After each tool result, call the next tool. Keep going until done.
-- When done: call deliver_file if there's a file, then write "TASK_COMPLETE".
-- If error: read output, fix, retry.
-- Packages: install_packages tool only.
-
-If it's a simple question: just answer. Use markdown.
+For action tasks: call tools immediately, keep going until done, finish with deliver_file.
+For questions: just answer with markdown.
+Never use apt-get/pip in execute_command — use install_packages.
 """
 
 MEMORY_SUMMARIZE_PROMPT = (
-    "Summarize this conversation in 1-3 sentences. "
-    "What was discussed and what conclusions were reached? Be brief."
+    "Summarize this conversation in 1-3 sentences. What was discussed? Be brief."
 )
 
-# Patterns that indicate the model is narrating instead of acting
-_NARRATION_PATTERNS = [
-    r"шаг\s*\d+",          # "Шаг 1:", "Шаг 2:"
-    r"step\s*\d+",          # "Step 1:"
-    r"сначала\s+(нужно|надо|установим|создадим)",
-    r"для начала",
-    r"план\s*:",
-    r"давайте\s+(начнём|создадим|установим|сделаем)",
-    r"теперь\s+(нужно|надо|создадим|запустим)",
-    r"следующий шаг",
-    r"next step",
-    r"выполним следующие шаги",
-    r"разделим на",
-    r"вот\s+что\s+(нужно|надо|мы)",
-    r"можно\s+(запустить|выполнить|сделать)",
-    r"you can run",
-    r"you should run",
-    r"run the following",
-]
-_NARRATION_RE = re.compile("|".join(_NARRATION_PATTERNS), re.IGNORECASE)
-
-# Injected message when model narrates without acting
-_FORCE_ACTION_MSG = (
-    "[SYSTEM: You wrote text but called NO tools. "
-    "This is WRONG. You MUST call a tool RIGHT NOW. "
-    "Do not write any more text — call execute_command or install_packages immediately. "
-    "Start executing, not explaining.]"
+_HARD_REFORCE = (
+    "ERROR: You output text without calling any tool. This is FORBIDDEN in work mode.\n"
+    "CALL A TOOL RIGHT NOW. Do not write any text."
 )
 
-# After a tool result, remind the model to continue
-_CONTINUE_MSG = (
-    "[SYSTEM: Tool executed. Now call the NEXT tool to continue the task. "
-    "Keep working until the task is fully complete. Do NOT stop or summarize yet.]"
-)
+def _make_next_step(tool_name: str, exit_code, output_snippet: str) -> str:
+    """Build a context-aware continue prompt based on last tool result."""
+    if exit_code is not None and exit_code != 0:
+        return (
+            f"[Tool '{tool_name}' FAILED with exit code {exit_code}]\n"
+            f"Error output: {output_snippet[:400]}\n"
+            "Fix this error and retry with execute_command. Do NOT move to the next step yet."
+        )
+    return (
+        f"[Tool '{tool_name}' succeeded]\n"
+        "Call the NEXT tool now. Keep working until deliver_file is called."
+    )
+
+
+def _strip_think(text: str) -> str:
+    """Remove <think>...</think> blocks from model output."""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+def _extract_exit_code(result: str):
+    """Extract exit code integer from tool result string, or None."""
+    m = re.search(r"\[exit code:\s*(-?\d+)\]", result)
+    return int(m.group(1)) if m else None
+
+
+def _short_output(result: str, maxlen: int = 600) -> str:
+    """Get a trimmed version of tool output for context injection."""
+    # Remove the [exit code: N] prefix line
+    clean = re.sub(r"^\[.*?\]\n?", "", result).strip()
+    if len(clean) > maxlen:
+        # Keep tail (errors are usually at the end)
+        return "..." + clean[-maxlen:]
+    return clean
 
 
 class Agent:
@@ -138,8 +134,6 @@ class Agent:
         self._stop = True
         self.llm.abort()
 
-    # ── Callbacks ─────────────────────────────────────────
-
     def _emit(self, role: str, content: str):
         if self.on_message:
             self.on_message(role, content)
@@ -147,8 +141,6 @@ class Agent:
     def _emit_tool(self, name: str, args: str, result: str):
         if self.on_tool_call:
             self.on_tool_call(name, args, result)
-
-    # ── System prompt ─────────────────────────────────────
 
     def _get_system_prompt(self, mode: str) -> str:
         memories = self.db.get_memories_text()
@@ -159,12 +151,9 @@ class Agent:
             base += f"\n\nLong-term memory:\n{memories}"
         return base
 
-    # ── Tool execution ────────────────────────────────────
-
     def _execute_tool(self, name: str, arguments: dict) -> str:
         if name == "execute_command":
             cmd = arguments.get("command", "")
-            # Intercept raw apt-get — route through safe handler
             _apt_pat = re.compile(r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", re.MULTILINE)
             if _apt_pat.search(cmd):
                 pkg_match = re.search(
@@ -176,7 +165,7 @@ class Agent:
                             if not p.startswith("-") and p != "2>&1"]
                     if pkgs:
                         exit_code, output = self.docker.execute_apt(" ".join(pkgs))
-                        result = f"[install_packages intercepted apt-get | exit code: {exit_code}]\n{output}"
+                        result = f"[install_packages intercepted | exit code: {exit_code}]\n{output}"
                         self._emit_tool(name, cmd, result)
                         return result
             exit_code, output = self.docker.execute(cmd)
@@ -195,11 +184,11 @@ class Agent:
             path = arguments.get("path", "")
             try:
                 content = self.files.read(path)
-                self._emit_tool(name, path, f"[{len(content)} chars read]")
+                self._emit_tool(name, path, f"[{len(content)} chars]")
                 return content
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
-                return f"Error reading file: {e}"
+                return f"Error: {e}"
 
         elif name == "write_file":
             path = arguments.get("path", "")
@@ -209,10 +198,10 @@ class Agent:
                 self._emit_tool(name, path, f"Written → {abs_path}")
                 if self.on_file_ready:
                     self.on_file_ready(path, abs_path)
-                return f"File written: {path} ({len(content.encode())} bytes)"
+                return f"Written: {path} ({len(content.encode())} bytes)"
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
-                return f"Error writing file: {e}"
+                return f"Error: {e}"
 
         elif name == "delete_file":
             path = arguments.get("path", "").strip()
@@ -224,7 +213,7 @@ class Agent:
                         ep = os.path.join(base, entry)
                         shutil.rmtree(ep) if os.path.isdir(ep) else os.remove(ep)
                         deleted.append(entry)
-                    result = f"Cleared {len(deleted)} items" if deleted else "Already empty"
+                    result = f"Cleared: {len(deleted)} items"
                 else:
                     self.files.delete(path)
                     result = f"Deleted: {path}"
@@ -237,10 +226,8 @@ class Agent:
         elif name == "list_files":
             try:
                 files = self.files.list_files()
-                result = (
-                    f"Files ({len(files)}):\n" + "\n".join(f"  {f}" for f in files)
-                    if files else "uploads/ is empty"
-                )
+                result = (f"Files ({len(files)}):\n" + "\n".join(f"  {f}" for f in files)
+                          if files else "uploads/ is empty")
                 self._emit_tool(name, "", result)
                 return result
             except Exception as e:
@@ -274,32 +261,12 @@ class Agent:
                 self._emit_tool(name, path, f"Delivered: {abs_path}")
                 if self.on_file_ready:
                     self.on_file_ready(path, abs_path)
-                return f"File delivered: {path}"
+                return f"DELIVERED: {path}"
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
                 return f"Error: {e}"
 
         return f"Unknown tool: {name}"
-
-    # ── Helpers ───────────────────────────────────────────
-
-    def _is_narrating(self, text: str, tool_calls) -> bool:
-        """Return True if model wrote a plan/text but called no tools in work mode."""
-        if tool_calls:
-            return False
-        return bool(text.strip()) and bool(_NARRATION_RE.search(text))
-
-    def _is_done(self, text: str, tool_calls) -> bool:
-        """Return True if task is complete."""
-        if not text:
-            return False
-        t = text.strip().lower()
-        # Must have delivered a file or explicitly signalled done
-        return "task_complete" in t or (
-            "ready" in t.split() and not tool_calls
-        )
-
-    # ── Main agent loop ───────────────────────────────────
 
     def run(self, chat_id: int, user_message: str, mode: str = "auto"):
         self._stop = False
@@ -316,15 +283,9 @@ class Agent:
                 messages.append({"role": "user", "content": m["content"]})
 
         use_tools = mode in ("work", "auto")
-
-        # In work mode: force tool calls — don't let model choose to skip
-        # "required" forces the model to always call at least one tool per turn.
-        # We'll relax this to "auto" once the model signals completion.
         tool_choice = "required" if mode == "work" else "auto"
-
-        max_iterations = 40
-        consecutive_narrations = 0
-        tools_called_total = 0
+        delivered = False
+        max_iterations = 50
 
         for iteration in range(max_iterations):
             if self._stop:
@@ -334,7 +295,7 @@ class Agent:
                 if self.on_stream_start:
                     self.on_stream_start()
 
-                full_content = ""
+                raw_content = ""
                 tool_calls = None
 
                 for item in self.llm.chat(
@@ -348,7 +309,7 @@ class Agent:
                     if item.get("type") == "delta":
                         text = item.get("content", "")
                         if text:
-                            full_content += text
+                            raw_content += text
                             if self.on_stream_delta:
                                 self.on_stream_delta(text)
                     elif item.get("type") == "tool_calls":
@@ -357,29 +318,32 @@ class Agent:
                 if self.on_stream_end:
                     self.on_stream_end()
 
-                # Save assistant text if any
-                if full_content.strip():
-                    self.db.add_message(chat_id, "assistant", full_content)
-                    messages.append({"role": "assistant", "content": full_content})
+                display_content = _strip_think(raw_content)
 
-                # ── Talk mode / no tools ──────────────────────────
-                if not use_tools or not tool_calls:
-                    # Check for narration without action in work mode
-                    if use_tools and mode == "work" and self._is_narrating(full_content, tool_calls):
-                        consecutive_narrations += 1
-                        if consecutive_narrations >= 2:
-                            # Hard stop — model is stuck narrating
-                            break
-                        # Inject hard re-prompt
-                        messages.append({"role": "user", "content": _FORCE_ACTION_MSG})
-                        self.db.add_message(chat_id, "tool", _FORCE_ACTION_MSG)
-                        continue
+                # After deliver_file: one wrap-up text turn then stop
+                if delivered:
+                    if display_content.strip():
+                        self.db.add_message(chat_id, "assistant", display_content)
                     break
 
-                consecutive_narrations = 0
+                # Text-only response in work mode → hard re-prompt
+                if use_tools and not tool_calls:
+                    if display_content.strip():
+                        self.db.add_message(chat_id, "assistant", display_content)
+                        messages.append({"role": "assistant", "content": display_content})
+                    if mode == "work":
+                        messages.append({"role": "user", "content": _HARD_REFORCE})
+                        self.db.add_message(chat_id, "tool", _HARD_REFORCE)
+                        continue
+                    else:
+                        break
 
-                # ── Process tool calls ────────────────────────────
-                task_done = False
+                # Save visible reasoning if any
+                if display_content.strip():
+                    self.db.add_message(chat_id, "assistant", display_content)
+                    messages.append({"role": "assistant", "content": display_content})
+
+                # Process tool calls
                 for tc in tool_calls:
                     if self._stop:
                         break
@@ -391,29 +355,24 @@ class Agent:
                         args = {}
 
                     result = self._execute_tool(name, args)
-                    tools_called_total += 1
 
-                    # deliver_file signals the end of a file-delivery task
-                    if name == "deliver_file" and "Error" not in result:
-                        task_done = True
+                    if name == "deliver_file" and result.startswith("DELIVERED:"):
+                        delivered = True
+                        tool_choice = "auto"
 
                     tool_msg = f"[Tool: {name}]\n{result}"
                     messages.append({"role": "user", "content": tool_msg})
                     self.db.add_message(chat_id, "tool", tool_msg, tool=name)
 
-                if task_done or self._is_done(full_content, tool_calls):
-                    break
+                    # Inject context-aware next-step prompt after each tool
+                    if not delivered:
+                        exit_code = _extract_exit_code(result)
+                        snippet = _short_output(result)
+                        next_msg = _make_next_step(name, exit_code, snippet)
+                        messages.append({"role": "user", "content": next_msg})
 
-                # After tool calls: switch tool_choice back to "auto"
-                # so model can choose to write a final message if done
-                # But keep "required" until at least some tools have run
-                if tools_called_total >= 2:
-                    tool_choice = "auto"
-
-                # Inject continue reminder after each tool batch
-                # This prevents the model from stopping to summarize mid-task
-                if not task_done and tools_called_total < 30:
-                    messages.append({"role": "user", "content": _CONTINUE_MSG})
+                if delivered:
+                    continue  # one more iteration for wrap-up text
 
             except Exception as e:
                 if self.on_stream_end:

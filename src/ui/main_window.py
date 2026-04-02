@@ -444,10 +444,23 @@ class MainWindow(QMainWindow):
     def _export_txt(self, title, messages, exported):
         lines = [f"=== {title} ===", f"Экспортировано: {exported}", ""]
         for m in messages:
-            role = "Вы" if m["role"] == "user" else "Агент"
-            ts   = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
-            lines.append(f"[{role}]" + (f"  {ts}" if ts else ""))
-            lines.append(m["content"])
+            role = m["role"]
+            ts = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
+            if role == "user":
+                lines.append(f"[Вы]" + (f"  {ts}" if ts else ""))
+                lines.append(m["content"])
+            elif role == "assistant":
+                lines.append(f"[Агент]" + (f"  {ts}" if ts else ""))
+                lines.append(m["content"])
+            elif role == "tool":
+                tool_name = m.get("tool", "tool")
+                content = m.get("content", "")
+                # Extract command/args from [Tool: name]\ncontent format
+                content_clean = content
+                if content.startswith(f"[Tool: {tool_name}]\n"):
+                    content_clean = content[len(f"[Tool: {tool_name}]\n"):]
+                lines.append(f"[Tool: {tool_name}]" + (f"  {ts}" if ts else ""))
+                lines.append(content_clean[:2000])  # cap tool output at 2000 chars
             lines.append("")
         return "\n".join(lines)
 
@@ -457,20 +470,53 @@ class MainWindow(QMainWindow):
         msg_html = ""
         for m in messages:
             role = m["role"]
-            content = m["content"]
+            content = m.get("content", "")
             ts = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
             ts_span = f'<span class="ts">{htmllib.escape(ts)}</span>' if ts else ""
+
             if role == "user":
                 escaped = htmllib.escape(content).replace("\n", "<br>")
                 msg_html += (
-                    f'<div class="msg user"><div class="bubble user-bubble">{escaped}</div>{ts_span}</div>\n'
+                    f'<div class="msg user">'
+                    f'<div class="bubble user-bubble">{escaped}</div>{ts_span}</div>\n'
                 )
-            else:
+            elif role == "assistant":
                 rendered = _md_to_html(content)
                 msg_html += (
-                    f'<div class="msg assistant"><div class="label">◈ Агент</div>'
+                    f'<div class="msg assistant">'
+                    f'<div class="label">◈ Агент</div>'
                     f'<div class="bubble asst-bubble">{rendered}</div>{ts_span}</div>\n'
                 )
+            elif role == "tool":
+                tool_name = htmllib.escape(m.get("tool", "tool"))
+                # Strip wrapper "[Tool: name]\n" if present
+                body = content
+                prefix = f"[Tool: {m.get('tool', 'tool')}]\n"
+                if body.startswith(prefix):
+                    body = body[len(prefix):]
+                # Detect exit code
+                ec_match = _re.search(r'\[exit code:\s*(-?\d+)\]', body)
+                exit_code = int(ec_match.group(1)) if ec_match else None
+                body_clean = _re.sub(r'^\[.*?\]\n?', '', body).strip()
+                if exit_code is None:
+                    badge = ''
+                    hdr_style = 'color:#444'
+                elif exit_code == 0:
+                    badge = '<span style="background:#0a160b;border:1px solid #143418;color:#27502c;font-size:9px;border-radius:3px;padding:0 5px;margin-left:6px;">exit 0</span>'
+                    hdr_style = 'color:#2a5530'
+                else:
+                    badge = f'<span style="background:#140707;border:1px solid #370f0f;color:#621e1e;font-size:9px;border-radius:3px;padding:0 5px;margin-left:6px;">exit {exit_code}</span>'
+                    hdr_style = 'color:#632020'
+                escaped_body = htmllib.escape(body_clean[:3000])
+                msg_html += (
+                    f'<div class="msg tool">'
+                    f'<div class="tool-hdr" style="{hdr_style}">'
+                    f'<span class="tool-name">{tool_name}</span>{badge}{ts_span}'
+                    f'</div>'
+                    f'<pre class="tool-body">{escaped_body}</pre>'
+                    f'</div>\n'
+                )
+
         safe_title = htmllib.escape(title)
         safe_exported = htmllib.escape(exported[:19].replace("T", " "))
         return f"""<!DOCTYPE html>
@@ -479,21 +525,42 @@ class MainWindow(QMainWindow):
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0a0a0a;color:#c4c4c4;font-family:"Inter",system-ui,sans-serif;
-font-size:15px;line-height:1.7;max-width:820px;margin:0 auto;padding:40px 24px 80px}}
+font-size:14px;line-height:1.7;max-width:900px;margin:0 auto;padding:40px 24px 80px}}
 header{{border-bottom:1px solid #1a1a1a;padding-bottom:20px;margin-bottom:32px}}
-header h1{{font-size:22px;font-weight:700;color:#e0e0e0}}
-header .meta{{color:#333;font-size:12px;margin-top:6px}}
-.msg{{margin:18px 0}}
+header h1{{font-size:20px;font-weight:700;color:#e0e0e0}}
+header .meta{{color:#333;font-size:11px;margin-top:6px}}
+.msg{{margin:14px 0}}
 .msg.user{{display:flex;flex-direction:column;align-items:flex-end}}
 .msg.assistant{{display:flex;flex-direction:column;align-items:flex-start}}
-.bubble{{border-radius:14px;padding:11px 16px;max-width:78%;word-wrap:break-word}}
-.user-bubble{{background:#161616;border:1px solid #242424;border-radius:14px 14px 3px 14px;color:#eeeeee}}
+.msg.tool{{margin:6px 0 6px 52px}}
+.bubble{{border-radius:13px;padding:10px 14px;max-width:78%;word-wrap:break-word}}
+.user-bubble{{background:#161616;border:1px solid #242424;border-radius:13px 13px 3px 13px;color:#eeeeee}}
 .asst-bubble{{background:transparent;color:#bdbdbd;padding:0;max-width:92%}}
-.label{{font-size:11px;color:#303030;margin-bottom:6px;letter-spacing:0.5px;text-transform:uppercase}}
-.ts{{font-size:10px;color:#262626;margin-top:5px}}
+.label{{font-size:10px;color:#303030;margin-bottom:5px;letter-spacing:0.5px;text-transform:uppercase}}
+.ts{{font-size:10px;color:#242424;margin-top:4px;margin-left:4px}}
+.tool-hdr{{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;
+  font-family:"JetBrains Mono","Consolas",monospace;margin-bottom:4px;
+  display:flex;align-items:center;gap:6px}}
+.tool-name{{}}
+.tool-body{{background:#080808;border:1px solid #141414;border-radius:5px;
+  padding:8px 12px;font-family:"JetBrains Mono","Consolas",monospace;
+  font-size:11px;color:#3a3a3a;white-space:pre-wrap;word-break:break-all;
+  max-height:300px;overflow-y:auto;margin:0}}
+h1,h2,h3,h4{{color:#e0e0e0;font-weight:600;margin:12px 0 4px}}
+h1{{font-size:17px}}h2{{font-size:15px}}h3{{font-size:14px}}
+strong{{color:#e8e8e8}}em{{color:#9a9a9a;font-style:italic}}
+code{{background:#141414;border:1px solid #1e1e1e;padding:2px 5px;
+  border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:12px;color:#b5a46a}}
+pre{{background:#080808;border:1px solid #141414;padding:10px 12px;border-radius:6px;
+  font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#6e6e6e;
+  white-space:pre-wrap;word-break:break-all;margin:6px 0}}
+ul,ol{{padding-left:20px;margin:4px 0}}li{{margin:2px 0;color:#bcbcbc}}
+a{{color:#6a9fd8;text-decoration:none}}
 </style></head><body>
-<header><h1>{safe_title}</h1><div class="meta">Quadrogent · {safe_exported}</div></header>
+<header><h1>{safe_title}</h1>
+<div class="meta">Quadrogent · {safe_exported}</div></header>
 {msg_html}</body></html>"""
+
 
     # ── Settings ───────────────────────────────────────────
 
