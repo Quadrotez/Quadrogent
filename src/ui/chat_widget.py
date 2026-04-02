@@ -405,11 +405,17 @@ class ChatWidget(QWidget):
         self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
         self.browser.anchorClicked.connect(self._on_link_clicked)
-        # Fix: proper scroll policy so wheel works naturally
         self.browser.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.browser.setHtml(MESSAGE_CSS + "<body></body>")
         layout.addWidget(self.browser, 1)
+
+        # ── Docker log panel (collapsible, hidden by default) ────────────────
+        self.docker_log = DockerLogPanel()
+        self.docker_log.setFixedHeight(180)
+        self.docker_log.hide()
+        self.docker_log.closed.connect(self._on_docker_log_closed)
+        layout.addWidget(self.docker_log, 0)
 
         # ── Input area ───────────────────────────────────
         self._input_container = QWidget()
@@ -839,3 +845,24 @@ class ChatWidget(QWidget):
     def _scroll_bottom(self):
         sb = self.browser.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def _on_docker_log_closed(self):
+        """Called when Docker log panel collapses after successful bootstrap."""
+        self.docker_log.hide()
+
+    def show_docker_log(self):
+        """Show and expand Docker log panel."""
+        self.docker_log.expand()
+        self.docker_log.show()
+
+    def hide_docker_log(self):
+        """Hide Docker log panel."""
+        self.docker_log.hide()
+
+    def append_docker_log(self, level: str, message: str):
+        """Append a log line to Docker log panel."""
+        self.docker_log.append_log(level, message)
+
+    def set_docker_log_done(self, success: bool):
+        """Mark Docker bootstrap as done."""
+        self.docker_log.set_done(success)

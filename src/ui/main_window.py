@@ -17,7 +17,6 @@ from src.core.agent import Agent
 from src.ui.chat_widget import ChatWidget
 from src.ui.settings_dialog import ChatSettingsDialog, AppSettingsDialog
 from src.ui.styles import DARK_THEME
-from src.ui.docker_log_panel import DockerLogPanel
 
 
 class AgentWorker(QThread):
@@ -118,19 +117,7 @@ class MainWindow(QMainWindow):
         self.chat.export_chat.connect(self._on_export_chat)
         self.chat.model_changed.connect(self._on_model_changed)
         self.chat.model_refresh.connect(self._refresh_models)
-        # Docker log panel sits below the chat widget
-        chat_container = QWidget()
-        chat_vl = QVBoxLayout(chat_container)
-        chat_vl.setContentsMargins(0, 0, 0, 0)
-        chat_vl.setSpacing(0)
-        chat_vl.addWidget(self.chat, 1)
-
-        self.docker_log = DockerLogPanel()
-        self.docker_log.setFixedHeight(200)
-        self.docker_log.hide()
-        chat_vl.addWidget(self.docker_log, 0)
-
-        splitter.addWidget(chat_container)
+        splitter.addWidget(self.chat)
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -144,10 +131,10 @@ class MainWindow(QMainWindow):
         from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
 
         self.chat.send_btn.setEnabled(False)
-        self.docker_log.show_panel()
+        self.chat.show_docker_log()
 
-        # Wire docker log callback → panel
-        self.agent.docker.on_log = self.docker_log.append_log
+        # Wire docker log callback → chat widget's docker panel
+        self.agent.docker.on_log = self.chat.append_docker_log
 
         def _set_send_enabled(val: bool):
             QMetaObject.invokeMethod(
@@ -157,7 +144,7 @@ class MainWindow(QMainWindow):
 
         def _run():
             ok = self.agent.docker.ensure_container()
-            self.docker_log.set_done(ok)
+            self.chat.set_docker_log_done(ok)
             _set_send_enabled(True)
 
         threading.Thread(target=_run, daemon=True).start()
@@ -359,10 +346,11 @@ class MainWindow(QMainWindow):
         """Called from sidebar context menu."""
         chat_data = self.db.get_chat(chat_id)
         messages  = self.db.get_messages(chat_id)
+        # Include ALL message types: user, assistant, AND tool calls
         raw = [
-            {"role": m["role"], "content": m["content"], "ts": m.get("ts", "")}
+            {"role": m["role"], "content": m["content"], "ts": m.get("ts", ""), "tool": m.get("tool")}
             for m in messages
-            if m["role"] in ("user", "assistant")
+            if m["role"] in ("user", "assistant", "tool")
         ]
         data = {
             "title": chat_data.get("title", "Чат") if chat_data else "Чат",
@@ -371,9 +359,9 @@ class MainWindow(QMainWindow):
         }
         # Ask format via small menu
         menu = QMenu(self)
-        menu.addAction("🌐  HTML", lambda: self._do_export(data, "html"))
-        menu.addAction("📄  TXT",  lambda: self._do_export(data, "txt"))
-        menu.addAction("📋  JSON", lambda: self._do_export(data, "json"))
+        menu.addAction("🌐  Красивый HTML", lambda: self._do_export(data, "html"))
+        menu.addAction("📄  Текст (TXT)",  lambda: self._do_export(data, "txt"))
+        menu.addAction("📋  Данные (JSON)", lambda: self._do_export(data, "json"))
         cursor = self.chat_list.mapToGlobal(self.chat_list.rect().center())
         menu.exec_(cursor)
 
@@ -413,11 +401,22 @@ class MainWindow(QMainWindow):
     def _export_txt(self, title: str, messages: list[dict], exported: str) -> str:
         lines = [f"=== {title} ===", f"Экспортировано: {exported}", ""]
         for m in messages:
-            role = "Вы" if m["role"] == "user" else "Агент"
+            role = m["role"]
             ts   = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
-            header = f"[{role}]" + (f"  {ts}" if ts else "")
-            lines.append(header)
-            lines.append(m["content"])
+            
+            if role == "user":
+                header = "[Вы]" + (f"  {ts}" if ts else "")
+                lines.append(header)
+                lines.append(m["content"])
+            elif role == "assistant":
+                header = "[Агент]" + (f"  {ts}" if ts else "")
+                lines.append(header)
+                lines.append(m["content"])
+            elif role == "tool":
+                tool_name = m.get("tool", "tool")
+                header = f"[Инструмент: {tool_name}]" + (f"  {ts}" if ts else "")
+                lines.append(header)
+                lines.append(m["content"])
             lines.append("")
         return "\n".join(lines)
 
@@ -430,6 +429,7 @@ class MainWindow(QMainWindow):
             role    = m["role"]
             content = m["content"]
             ts      = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
+            tool    = m.get("tool")
             ts_span = f'<span class="ts">{htmllib.escape(ts)}</span>' if ts else ""
 
             if role == "user":
@@ -439,7 +439,35 @@ class MainWindow(QMainWindow):
                     f'<div class="bubble user-bubble">{escaped}</div>'
                     f'{ts_span}</div>\n'
                 )
-            else:
+            elif role == "tool":
+                tool_name = tool or "tool"
+                # Parse exit code if present
+                import re as _re
+                ec_match = _re.search(r'\[exit code:\s*(-?\d+)\]', content)
+                exit_code = int(ec_match.group(1)) if ec_match else None
+                
+                # Determine status styling
+                if exit_code is not None:
+                    status_class = "tool-ok" if exit_code == 0 else "tool-err"
+                    status_text = f"exit {exit_code}"
+                else:
+                    status_class = "tool-info"
+                    status_text = "выполнен"
+                
+                # Strip exit code line from body
+                body = _re.sub(r'^\[exit code:\s*-?\d+\]\n?', '', content).strip()
+                escaped_body = htmllib.escape(body) if body else "(нет вывода)"
+                
+                msg_html += (
+                    f'<div class="msg tool">'
+                    f'<div class="tool-header {status_class}">'
+                    f'<span class="tool-name">⚙ {htmllib.escape(tool_name)}</span>'
+                    f'<span class="tool-status">{status_text}</span>'
+                    f'</div>'
+                    f'<div class="tool-body"><pre>{escaped_body}</pre></div>'
+                    f'{ts_span}</div>\n'
+                )
+            else:  # assistant
                 rendered = _md_to_html(content)
                 msg_html += (
                     f'<div class="msg assistant">'
@@ -524,6 +552,33 @@ class MainWindow(QMainWindow):
   .blockquote {{
     border-left: 3px solid #333; padding: 4px 12px;
     color: #888; margin: 6px 0; font-style: italic;
+  }}
+  /* Tool call styling */
+  .msg.tool {{ display: flex; flex-direction: column; align-items: flex-start; margin: 14px 0; }}
+  .tool-header {{
+    display: flex; align-items: center; gap: 10px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    padding: 4px 10px; border-radius: 6px; margin-bottom: 6px;
+  }}
+  .tool-header .tool-name {{ color: #5a5a5a; }}
+  .tool-header .tool-status {{
+    padding: 1px 6px; border-radius: 3px; font-size: 9px;
+  }}
+  .tool-ok {{ background: #0d1a0d; border: 1px solid #1a3a1a; }}
+  .tool-ok .tool-status {{ color: #3a6a3a; }}
+  .tool-err {{ background: #1a0808; border: 1px solid #3a1010; }}
+  .tool-err .tool-status {{ color: #7a3030; }}
+  .tool-info {{ background: #101018; border: 1px solid #202030; }}
+  .tool-info .tool-status {{ color: #505070; }}
+  .tool-body {{
+    background: #0b0b0b; border: 1px solid #1c1c1c;
+    border-radius: 8px; padding: 10px 14px; max-width: 95%;
+  }}
+  .tool-body pre {{
+    background: transparent; border: none; padding: 0; margin: 0;
+    font-family: "JetBrains Mono", Consolas, monospace; font-size: 12px;
+    color: #505050; white-space: pre-wrap; word-wrap: break-word;
   }}
 </style>
 </head>
