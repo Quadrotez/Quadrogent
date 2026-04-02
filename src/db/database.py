@@ -101,11 +101,11 @@ class Database:
 
     # ── Chats ─────────────────────────────────────────────
 
-    def create_chat(self, title: str = "Новый чат", mode: str = "auto") -> int:
+    def create_chat(self, title: str = "Новый чат", mode: str = "auto", persistent: int = 0) -> int:
         now = datetime.now().isoformat()
         cur = self._execute_commit(
-            "INSERT INTO chats (title, mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (title, mode, now, now),
+            "INSERT INTO chats (title, mode, persistent, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (title, mode, persistent, now, now),
         )
         return cur.lastrowid
 

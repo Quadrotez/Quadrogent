@@ -1,687 +1,287 @@
+# Qt's HTML engine only partially supports CSS classes in <style> blocks.
+# Inline styles are the ONLY reliable way to style in QTextBrowser.
+# This file keeps the Qt widget stylesheet (DARK_THEME) and the
+# minimal <style> block used as a base reset (MESSAGE_CSS).
+
 DARK_THEME = """
 QMainWindow, QDialog {
-    background-color: #0d0d0d;
-    color: #ececec;
+    background-color: #0a0a0a;
+    color: #e0e0e0;
 }
-
 QWidget {
-    background-color: #0d0d0d;
-    color: #ececec;
-    font-family: "Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;
-    font-size: 14px;
+    background-color: #0a0a0a;
+    color: #e0e0e0;
+    font-family: "Inter", "Segoe UI", "SF Pro Text", sans-serif;
+    font-size: 13px;
 }
 
-/* ── Sidebar ── */
+/* ── Sidebar ─────────────────────────── */
 #sidebar {
-    background-color: #080808;
-    border-right: 1px solid #161616;
+    background-color: #070707;
+    border-right: 1px solid #181818;
 }
-
-#sidebar QPushButton {
-    background-color: transparent;
-    color: #6b6b6b;
-    border: none;
-    padding: 8px 12px;
-    text-align: left;
-    font-size: 13px;
-    border-radius: 6px;
-    margin: 1px 6px;
-}
-
-#sidebar QPushButton:hover {
-    background-color: #131313;
-    color: #c0c0c0;
-}
-
-#chatList {
-    background-color: #080808;
-    border: none;
-    outline: none;
-}
-
-#chatList::item {
-    padding: 8px 12px;
-    border-radius: 6px;
-    color: #6b6b6b;
-    margin: 1px 6px;
-    font-size: 13px;
-}
-
-#chatList::item:selected {
-    background-color: #161616;
-    color: #e8e8e8;
-}
-
-#chatList::item:hover:!selected {
-    background-color: #0f0f0f;
-    color: #a0a0a0;
-}
-
 #newChatBtn {
     background-color: transparent;
-    color: #8a8a8a;
-    border: 1px solid #1e1e1e;
-    font-size: 13px;
+    color: #d8d8d8;
+    border: 1px solid #252525;
+    font-size: 12px;
+    font-weight: 500;
     padding: 9px 12px;
-    margin: 6px 8px 4px 8px;
-    border-radius: 6px;
+    margin: 6px 10px 4px 10px;
+    border-radius: 7px;
     text-align: left;
 }
+#newChatBtn:hover { background-color: #141414; border-color: #363636; color: #ffffff; }
+#chatList { background-color: #070707; border: none; outline: none; }
+#chatList::item {
+    padding: 9px 12px; border-radius: 6px;
+    color: #484848; margin: 1px 6px; font-size: 12px;
+    border-left: 2px solid transparent;
+}
+#chatList::item:selected {
+    background-color: #111111; color: #e0e0e0;
+    border-left: 2px solid #e0e0e0;
+}
+#chatList::item:hover:!selected { background-color: #0d0d0d; color: #777777; }
+#settingsBtn {
+    background-color: transparent; color: #363636;
+    border: none; border-top: 1px solid #111111;
+    font-size: 12px; padding: 11px 16px; margin: 0;
+    border-radius: 0; text-align: left;
+}
+#settingsBtn:hover { background-color: #0d0d0d; color: #777777; }
 
-#newChatBtn:hover {
-    background-color: #111111;
-    border-color: #282828;
-    color: #d0d0d0;
+/* ── Top bar ─────────────────────────── */
+#chatTopBar {
+    background-color: #080808;
+    border-bottom: 1px solid #141414;
+    min-height: 46px; max-height: 46px;
+}
+#modelLabel { color: #303030; font-size: 11px; background: transparent; }
+#modelCombo {
+    background-color: transparent; border: 1px solid #1c1c1c;
+    border-radius: 5px; padding: 3px 8px; color: #595959; font-size: 11px; min-width: 190px;
+}
+#modelCombo:hover { border-color: #2c2c2c; color: #888888; }
+#modelCombo::drop-down { border: none; width: 16px; }
+#modelCombo QAbstractItemView {
+    background-color: #0c0c0c; border: 1px solid #1c1c1c;
+    color: #777777; selection-background-color: #181818; outline: none; font-size: 11px;
+}
+#modelRefreshBtn {
+    background-color: transparent; border: 1px solid #181818;
+    border-radius: 5px; color: #2e2e2e; font-size: 13px; padding: 0;
+}
+#modelRefreshBtn:hover { background-color: #0f0f0f; border-color: #2a2a2a; color: #666666; }
+
+/* Mode toggle buttons */
+#chatModePersistent, #chatModeTemp {
+    background-color: transparent; border: 1px solid #1c1c1c;
+    color: #353535; font-size: 10px; padding: 3px 10px;
+    border-radius: 0; font-family: "Inter", sans-serif;
+}
+#chatModePersistent { border-radius: 4px 0 0 4px; border-right: none; }
+#chatModeTemp { border-radius: 0 4px 4px 0; }
+#chatModePersistent:hover, #chatModeTemp:hover { color: #777777; background: #0f0f0f; }
+#chatModePersistent[active="true"], #chatModeTemp[active="true"] {
+    background-color: #161616; color: #d0d0d0; border-color: #2a2a2a;
 }
 
-/* ── Chat area ── */
-#chatArea {
-    background-color: #0d0d0d;
+#exportBtn {
+    background-color: transparent; border: 1px solid #181818;
+    border-radius: 5px; color: #2e2e2e; font-size: 11px; padding: 4px 10px;
+}
+#exportBtn:hover { background-color: #0f0f0f; border-color: #2a2a2a; color: #555555; }
+
+#logToggleTopBtn {
+    background-color: transparent; border: 1px solid #181818;
+    border-radius: 5px; color: #2a2a2a; font-size: 11px; padding: 4px 10px;
+}
+#logToggleTopBtn:hover { background: #0f0f0f; border-color: #2a2a2a; color: #555555; }
+#logToggleTopBtn[active="true"] {
+    background: #111111; border-color: #303030; color: #888888;
 }
 
+/* ── Chat area ───────────────────────── */
+#chatArea { background-color: #0a0a0a; }
 QTextBrowser {
-    background-color: #0d0d0d;
-    border: none;
-    color: #d4d4d4;
-    padding: 0;
-    selection-background-color: #2a2a2a;
+    background-color: #0a0a0a; border: none;
+    color: #d0d0d0; padding: 0;
+    selection-background-color: #202020;
 }
 
-/* ── Input area ── */
+/* ── Input area ──────────────────────── */
 #inputArea {
-    background-color: #0d0d0d;
-    border-top: none;
-    padding-top: 0;
+    background-color: #090909;
+    border-top: 1px solid #131313;
 }
-
 #messageInput {
-    background-color: #141414;
-    border: 1px solid #212121;
-    border-radius: 12px;
-    padding: 12px 16px;
-    color: #ececec;
-    font-size: 14px;
-    line-height: 1.5;
+    background-color: #101010; border: 1px solid #202020;
+    border-radius: 10px; padding: 10px 14px;
+    color: #eeeeee; font-size: 13px; line-height: 1.5;
 }
+#messageInput:focus { border-color: #2c2c2c; background-color: #141414; }
 
-#messageInput:focus {
-    border-color: #303030;
-    background-color: #161616;
-    outline: none;
-}
-
-/* ── Buttons ── */
+/* ── Buttons ─────────────────────────── */
 QPushButton {
-    background-color: #141414;
-    color: #a0a0a0;
-    border: 1px solid #202020;
-    border-radius: 7px;
-    padding: 7px 14px;
-    font-size: 13px;
+    background-color: #0f0f0f; color: #777777;
+    border: 1px solid #1c1c1c; border-radius: 7px;
+    padding: 7px 14px; font-size: 12px;
 }
-
-QPushButton:hover {
-    background-color: #1a1a1a;
-    border-color: #2c2c2c;
-    color: #d8d8d8;
-}
-
-QPushButton:pressed {
-    background-color: #222222;
-}
+QPushButton:hover { background-color: #161616; border-color: #292929; color: #c8c8c8; }
+QPushButton:pressed { background-color: #1c1c1c; }
 
 #sendBtn {
-    background-color: #efefef;
-    color: #080808;
-    border: none;
-    border-radius: 10px;
-    font-weight: 700;
-    font-size: 15px;
-    padding: 0;
+    background-color: #efefef; color: #060606;
+    border: none; border-radius: 10px;
+    font-weight: 800; font-size: 16px; padding: 0;
 }
-
-#sendBtn:hover {
-    background-color: #ffffff;
-}
-
-#sendBtn:pressed {
-    background-color: #d4d4d4;
-}
+#sendBtn:hover { background-color: #ffffff; }
+#sendBtn:pressed { background-color: #cccccc; }
 
 #attachBtn {
-    background-color: transparent;
-    color: #4a4a4a;
-    border: 1px solid #1e1e1e;
-    border-radius: 10px;
-    font-size: 18px;
-    font-weight: 300;
-    padding: 0;
+    background-color: transparent; color: #323232;
+    border: 1px solid #1a1a1a; border-radius: 10px;
+    font-size: 17px; padding: 0;
+}
+#attachBtn:hover { background-color: #0f0f0f; color: #666666; border-color: #272727; }
+
+/* ── Status / agent bar ──────────────── */
+#statusLabel { color: #262626; font-size: 11px; padding: 1px 0; }
+#agentStatusBar {
+    background: #080808; border-top: 1px solid #0e0e0e;
+    padding: 0 16px; min-height: 26px; max-height: 26px;
+}
+#agentStatusLabel {
+    color: #242424; font-size: 11px; background: transparent;
+    letter-spacing: 0.5px; font-family: "JetBrains Mono", monospace;
 }
 
-#attachBtn:hover {
-    background-color: #141414;
-    color: #888888;
-    border-color: #2a2a2a;
-}
-
-/* ── Status ── */
-#statusLabel {
-    color: #3a3a3a;
-    font-size: 11px;
-    padding: 2px 4px;
-    letter-spacing: 0.2px;
-}
-
-/* ── Scrollbar ── */
-QScrollBar:vertical {
-    background: transparent;
-    width: 4px;
-    margin: 2px 0;
-}
-
-QScrollBar::handle:vertical {
-    background: #202020;
-    border-radius: 2px;
-    min-height: 24px;
-}
-
-QScrollBar::handle:vertical:hover {
-    background: #303030;
-}
-
+/* ── Scrollbar ───────────────────────── */
+QScrollBar:vertical { background: transparent; width: 4px; margin: 2px 0; }
+QScrollBar::handle:vertical { background: #1c1c1c; border-radius: 2px; min-height: 24px; }
+QScrollBar::handle:vertical:hover { background: #2c2c2c; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QScrollBar:horizontal { height: 0; }
 
-/* ── ComboBox ── */
+/* ── ComboBox ────────────────────────── */
 QComboBox {
-    background-color: #111111;
-    border: 1px solid #1e1e1e;
-    border-radius: 6px;
-    padding: 5px 10px;
-    color: #888888;
-    min-width: 100px;
-    font-size: 12px;
+    background-color: #0d0d0d; border: 1px solid #1a1a1a;
+    border-radius: 6px; padding: 5px 10px; color: #555555; font-size: 12px;
 }
-
-QComboBox:hover {
-    border-color: #282828;
-    color: #aaaaaa;
-}
-
+QComboBox:hover { border-color: #262626; color: #888888; }
 QComboBox::drop-down { border: none; width: 18px; }
-
 QComboBox QAbstractItemView {
-    background-color: #111111;
-    border: 1px solid #1e1e1e;
-    color: #888888;
-    selection-background-color: #1e1e1e;
-    outline: none;
+    background-color: #0d0d0d; border: 1px solid #1c1c1c;
+    color: #777777; selection-background-color: #1a1a1a; outline: none;
 }
 
-/* ── Labels ── */
-QLabel {
-    color: #6b6b6b;
-    background: transparent;
-}
-
-/* ── Checkbox ── */
-QCheckBox { color: #777777; spacing: 8px; }
+/* ── Labels ──────────────────────────── */
+QLabel { color: #484848; background: transparent; }
+QCheckBox { color: #555555; spacing: 8px; }
 QCheckBox::indicator {
-    width: 15px; height: 15px;
-    border: 1px solid #2e2e2e;
-    border-radius: 4px;
-    background: #111111;
+    width: 14px; height: 14px; border: 1px solid #282828;
+    border-radius: 3px; background: #0d0d0d;
 }
-QCheckBox::indicator:checked {
-    background: #e0e0e0;
-    border-color: #e0e0e0;
-}
+QCheckBox::indicator:checked { background: #dddddd; border-color: #dddddd; }
 
-/* ── Menu ── */
+/* ── Menu ────────────────────────────── */
 QMenu {
-    background-color: #111111;
-    border: 1px solid #222222;
-    border-radius: 10px;
-    padding: 5px;
+    background-color: #0c0c0c; border: 1px solid #202020;
+    border-radius: 8px; padding: 4px;
 }
-QMenu::item { padding: 8px 16px; border-radius: 5px; color: #a8a8a8; font-size: 13px; }
-QMenu::item:selected { background-color: #1a1a1a; color: #e8e8e8; }
+QMenu::item { padding: 7px 16px; border-radius: 5px; color: #777777; font-size: 12px; }
+QMenu::item:selected { background-color: #141414; color: #dddddd; }
+QMenu::separator { height: 1px; background: #181818; margin: 4px 8px; }
 
-/* ── Splitter ── */
-QSplitter::handle { background: #131313; width: 1px; }
+/* ── Splitter ────────────────────────── */
+QSplitter::handle { background: #0f0f0f; }
+QSplitter::handle:horizontal { width: 1px; }
+QSplitter::handle:vertical { height: 1px; }
 
-/* ── LineEdit ── */
+/* ── LineEdit ────────────────────────── */
 QLineEdit {
-    background-color: #111111;
-    border: 1px solid #1e1e1e;
-    border-radius: 6px;
-    padding: 7px 12px;
-    color: #d0d0d0;
+    background-color: #0d0d0d; border: 1px solid #1a1a1a;
+    border-radius: 6px; padding: 7px 12px; color: #cccccc; font-size: 12px;
 }
-QLineEdit:focus { border-color: #303030; }
+QLineEdit:focus { border-color: #2a2a2a; }
 
-/* ── Tab ── */
-QTabWidget::pane { border: 1px solid #181818; background: #0d0d0d; }
-QTabBar::tab { background: transparent; color: #505050; padding: 8px 18px; border-bottom: 2px solid transparent; font-size: 13px; }
-QTabBar::tab:selected { color: #d0d0d0; border-bottom: 2px solid #d0d0d0; }
-QTabBar::tab:hover:!selected { color: #888888; }
+/* ── Tab ─────────────────────────────── */
+QTabWidget::pane { border: 1px solid #141414; background: #0a0a0a; }
+QTabBar::tab {
+    background: transparent; color: #303030;
+    padding: 8px 16px; border-bottom: 2px solid transparent; font-size: 12px;
+}
+QTabBar::tab:selected { color: #c0c0c0; border-bottom: 2px solid #c0c0c0; }
+QTabBar::tab:hover:!selected { color: #555555; }
 
-/* ── Chat top bar ── */
-#chatTopBar {
-    background-color: #0d0d0d;
-    border-bottom: 1px solid #141414;
+/* ── Right log panel ─────────────────── */
+#logPanel { background-color: #060606; border-left: 1px solid #131313; }
+#logPanelHeader {
+    background: #080808; border-bottom: 1px solid #101010;
+    min-height: 38px; max-height: 38px;
 }
+#logPanelTitle {
+    color: #2e2e2e; font-size: 10px; font-weight: 600;
+    letter-spacing: 1.2px; background: transparent;
+    font-family: "JetBrains Mono", monospace;
+}
+#logCloseBtn {
+    background: transparent; border: 1px solid #181818;
+    border-radius: 4px; color: #282828; font-size: 12px; padding: 1px 7px;
+}
+#logCloseBtn:hover { background: #0f0f0f; color: #555555; border-color: #282828; }
 
-/* ── Model selector ── */
-#modelCombo {
-    background-color: transparent;
-    border: 1px solid #1a1a1a;
-    border-radius: 5px;
-    padding: 3px 8px;
-    color: #484848;
-    font-size: 12px;
-    min-width: 180px;
-}
-#modelCombo:hover {
-    border-color: #252525;
-    color: #707070;
-}
-#modelCombo::drop-down { border: none; width: 16px; }
-#modelCombo QAbstractItemView {
-    background-color: #0e0e0e;
-    border: 1px solid #1a1a1a;
-    color: #888888;
-    selection-background-color: #161616;
-    outline: none;
-    font-size: 12px;
-}
-
-/* ── Model refresh button ── */
-#modelRefreshBtn {
-    background-color: transparent;
-    border: 1px solid #1a1a1a;
-    border-radius: 5px;
-    color: #333333;
-    font-size: 13px;
-    padding: 0;
-}
-#modelRefreshBtn:hover {
-    background-color: #111111;
-    border-color: #242424;
-    color: #606060;
-}
-
-/* ── Export button ── */
-#exportBtn {
-    background-color: transparent;
-    border: 1px solid #1a1a1a;
-    border-radius: 5px;
-    color: #333333;
-    font-size: 12px;
-    padding: 4px 10px;
-}
-#exportBtn:hover {
-    background-color: #111111;
-    border-color: #242424;
-    color: #606060;
+/* ── Dialog ──────────────────────────── */
+QDialog { background: #0b0b0b; }
+QDialog QLabel { color: #606060; font-size: 12px; }
+QTextEdit {
+    background-color: #0d0d0d; border: 1px solid #1a1a1a;
+    border-radius: 5px; color: #888888; font-size: 12px; padding: 4px;
 }
 """
 
-
+# MESSAGE_CSS: minimal base only — all real styles are INLINE in Python
+# Qt's QTextBrowser only reliably supports inline style="" attributes
 MESSAGE_CSS = """
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
+* { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-    font-family: "Inter", "Segoe UI", "SF Pro Text", system-ui, sans-serif;
-    font-size: 14.5px;
-    color: #c8c8c8;
-    background: #0d0d0d;
-    padding: 24px 0 20px 0;
-    line-height: 1.75;
-}
-
-/* ── Message layout ── */
-.msg-wrap {
-    padding: 2px 48px;
-    max-width: 100%;
-}
-
-.msg-wrap.user {
-    display: flex;
-    justify-content: flex-end;
-    padding: 4px 32px;
-}
-
-.bubble-user {
-    background: #1a1a1a;
-    border: 1px solid #242424;
-    border-radius: 18px 18px 4px 18px;
-    padding: 11px 16px;
-    max-width: 70%;
-    color: #e8e8e8;
-    font-size: 14.5px;
-    word-wrap: break-word;
-    line-height: 1.65;
-}
-
-.msg-wrap.assistant {
-    padding: 4px 48px;
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-}
-
-/* Assistant avatar dot */
-.msg-wrap.assistant::before {
-    content: "";
-    display: inline-block;
-    width: 24px;
-    height: 24px;
-    min-width: 24px;
-    border-radius: 50%;
-    background: #1c1c1c;
-    border: 1px solid #242424;
-    margin-top: 2px;
-}
-
-.bubble-assistant {
-    color: #cccccc;
-    font-size: 14.5px;
-    max-width: calc(100% - 36px);
-    word-wrap: break-word;
-    flex: 1;
-}
-
-/* ── Markdown inside assistant ── */
-.bubble-assistant h1, .bubble-assistant h2, .bubble-assistant h3,
-.bubble-assistant h4, .bubble-assistant h5, .bubble-assistant h6 {
-    color: #e4e4e4;
-    font-weight: 600;
-    margin: 16px 0 6px 0;
-    line-height: 1.3;
-}
-.bubble-assistant h1 { font-size: 20px; }
-.bubble-assistant h2 { font-size: 17px; }
-.bubble-assistant h3 { font-size: 15px; }
-.bubble-assistant h4, .bubble-assistant h5, .bubble-assistant h6 { font-size: 14px; }
-
-.bubble-assistant strong { color: #e8e8e8; font-weight: 600; }
-.bubble-assistant em { font-style: italic; color: #b0b0b0; }
-
-.bubble-assistant ul, .bubble-assistant ol {
-    padding-left: 20px;
-    margin: 6px 0;
-}
-.bubble-assistant li {
-    margin: 4px 0;
-    color: #c0c0c0;
-}
-
-.bubble-assistant a {
-    color: #6ba3d6;
-    text-decoration: none;
-}
-.bubble-assistant a:hover { text-decoration: underline; }
-
-.bubble-assistant hr {
-    border: none;
-    border-top: 1px solid #202020;
-    margin: 12px 0;
-}
-
-.bubble-assistant .blockquote {
-    border-left: 3px solid #2a2a2a;
-    padding: 4px 14px;
-    color: #787878;
-    margin: 8px 0;
-    font-style: italic;
-}
-
-.bubble-assistant code {
-    background: #161616;
-    border: 1px solid #222222;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-    font-size: 13px;
-    color: #c0a870;
-}
-
-.code-block {
-    margin: 10px 0;
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid #1c1c1c;
     background: #0a0a0a;
+    color: #c4c4c4;
+    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 16px 0 12px 0;
 }
-.code-lang {
-    display: block;
-    background: #0e0e0e;
-    color: #3a3a3a;
-    font-size: 10.5px;
-    padding: 5px 14px;
-    letter-spacing: 0.6px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    text-transform: uppercase;
-    border-bottom: 1px solid #161616;
-}
-.code-block pre {
-    background: #0a0a0a;
-    padding: 14px 16px;
-    margin: 0;
-}
-.code-block pre code {
-    background: none;
-    border: none;
-    padding: 0;
-    font-size: 13px;
-    color: #8a8a8a;
-    color: #9ca3af;
-}
-
-/* ── Error / tool ── */
-.msg-wrap.error { padding: 4px 48px; }
-.bubble-error {
-    color: #e05555;
-    border-left: 2px solid #c03333;
-    padding-left: 12px;
-    font-size: 13.5px;
-    max-width: 88%;
-    line-height: 1.6;
-}
-
-.tool-wrap { padding: 2px 48px 2px 84px; }
-.tool-header {
-    color: #2e2e2e;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 1.4px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    margin-bottom: 4px;
-}
-.tool-body {
-    background: #090909;
-    border: 1px solid #181818;
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    font-size: 12px;
-    color: #404040;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    max-width: 92%;
-    line-height: 1.5;
-}
-
-/* ── Streaming cursor ── */
-.cursor {
-    display: inline-block;
-    width: 2px;
-    height: 15px;
-    background: #404040;
-    margin-left: 2px;
-    vertical-align: text-bottom;
-    animation: blink 1s step-end infinite;
-}
-@keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
-}
-
-/* ── Generic code / pre ── */
+table { border-collapse: collapse; }
+a { color: #6a9fd8; text-decoration: none; }
+a:hover { text-decoration: underline; }
 code {
-    background: #161616;
-    border: 1px solid #202020;
-    padding: 2px 6px;
-    border-radius: 4px;
     font-family: "JetBrains Mono", "Consolas", monospace;
-    font-size: 13px;
-    color: #c0a870;
+    font-size: 12.5px; color: #b5a46a;
+    background: #141414; border: 1px solid #1e1e1e;
+    padding: 2px 5px; border-radius: 4px;
 }
 pre {
-    background: #0a0a0a;
-    border: 1px solid #181818;
-    padding: 14px 16px;
-    border-radius: 9px;
-    font-size: 13px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    color: #7a7a7a;
+    background: #080808; border: 1px solid #141414;
+    padding: 12px 14px; border-radius: 7px;
+    font-size: 12.5px; white-space: pre-wrap; word-wrap: break-word;
+    font-family: "JetBrains Mono", "Consolas", monospace; color: #6e6e6e;
     margin: 8px 0;
-    white-space: pre-wrap;
-    word-wrap: break-word;
 }
 pre code { background: none; border: none; padding: 0; }
-
-/* ── Math (LaTeX rendered) ── */
-.math-block {
-    display: block;
-    background: #0e0e0e;
-    border: 1px solid #1c1c1c;
-    border-radius: 6px;
-    padding: 10px 16px;
-    margin: 8px 0;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    font-size: 13.5px;
-    color: #b8a060;
-    text-align: center;
-    overflow-x: auto;
+h1,h2,h3,h4,h5,h6 { color: #e6e6e6; font-weight: 600; margin: 14px 0 5px 0; }
+h1 { font-size: 18px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
+strong { color: #ebebeb; font-weight: 600; }
+em { font-style: italic; color: #9a9a9a; }
+ul, ol { padding-left: 20px; margin: 5px 0; }
+li { margin: 3px 0; color: #bcbcbc; }
+hr { border: none; border-top: 1px solid #1c1c1c; margin: 10px 0; }
+blockquote {
+    border-left: 2px solid #242424; padding: 4px 12px;
+    color: #606060; margin: 8px 0; font-style: italic;
 }
-.math-inline {
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    font-size: 13px;
-    color: #b8a060;
-    background: #111111;
-    padding: 1px 4px;
-    border-radius: 3px;
-}
-
-
-/* ── Tool output improvements ── */
-.tool-header { display: flex; align-items: center; gap: 8px; }
-.tool-name {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 1.4px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-}
-.tool-header-ok .tool-name { color: #3a6a3a; }
-.tool-header-err .tool-name { color: #7a3030; }
-
-.ec-ok {
-    font-size: 10px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    color: #2e5a2e;
-    background: #0d1a0d;
-    border: 1px solid #1a3a1a;
-    border-radius: 3px;
-    padding: 0px 5px;
-}
-.ec-err {
-    font-size: 10px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    color: #7a2020;
-    background: #1a0808;
-    border: 1px solid #3a1010;
-    border-radius: 3px;
-    padding: 0px 5px;
-}
-
 </style>
 """
-
-# File chip + file card CSS appended to MESSAGE_CSS
-_EXTRA = """
-.attach-chip {
-    background: #141414;
-    border: 1px solid #202020;
-    border-radius: 8px;
-    margin-bottom: 6px;
-}
-.attach-chip .ac-icon {
-    padding: 8px 8px 8px 10px;
-    font-size: 15px;
-}
-.attach-chip .ac-name {
-    padding: 8px 6px;
-    color: #c0c0c0;
-    font-size: 13px;
-    font-weight: 500;
-}
-.attach-chip .ac-ext {
-    padding: 8px 10px 8px 4px;
-    color: #484848;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-.bubble-file-text {
-    color: #e0e0e0;
-    font-size: 14px;
-    padding-top: 6px;
-}
-
-.fc-wrap {
-    padding: 4px 32px 4px 84px;
-}
-.file-card {
-    background: #0e0e0e;
-    border: 1px solid #1c1c1c;
-    border-radius: 10px;
-    max-width: 360px;
-}
-.file-card .fc-icon-cell {
-    padding: 12px 10px 12px 14px;
-    font-size: 22px;
-    vertical-align: middle;
-}
-.file-card .fc-info-cell {
-    padding: 12px 8px;
-    vertical-align: middle;
-}
-.file-card .fc-name {
-    color: #d0d0d0;
-    font-size: 13px;
-    font-weight: 500;
-}
-.file-card .fc-meta {
-    color: #383838;
-    font-size: 11px;
-    margin-top: 2px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-.file-card .fc-action-cell {
-    padding: 12px 14px 12px 8px;
-    vertical-align: middle;
-}
-.fc-link {
-    color: #5a8fc0;
-    font-size: 12px;
-    text-decoration: none;
-    white-space: nowrap;
-}
-"""
-
-MESSAGE_CSS = MESSAGE_CSS.replace("</style>", _EXTRA + "\n</style>")

@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QLabel, QMessageBox, QMenu, QFileDialog,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QDesktopServices, QPixmap
 from PyQt5.QtCore import QUrl
 
 from src.db.database import Database
@@ -17,7 +17,7 @@ from src.core.agent import Agent
 from src.ui.chat_widget import ChatWidget
 from src.ui.settings_dialog import ChatSettingsDialog, AppSettingsDialog
 from src.ui.styles import DARK_THEME
-from src.ui.docker_log_panel import DockerLogPanel
+from src.ui.right_log_panel import RightLogPanel
 
 
 class AgentWorker(QThread):
@@ -56,8 +56,8 @@ class MainWindow(QMainWindow):
         self.worker: AgentWorker | None = None
 
         self.setWindowTitle("Quadrogent")
-        self.setMinimumSize(900, 600)
-        self.resize(1200, 750)
+        self.setMinimumSize(960, 640)
+        self.resize(1340, 800)
         self.setStyleSheet(DARK_THEME)
 
         self._build()
@@ -67,10 +67,9 @@ class MainWindow(QMainWindow):
         if not self.agent.llm.check_connection():
             self.chat.status_label.setText("⚠ LM Studio не найден (localhost:1234)")
 
-        # Bootstrap Docker container in background so UI stays responsive
         self._init_docker_async()
 
-    # ── Layout ────────────────────────────────────────────
+    # ── Layout ──────────────────────────────────────────────
 
     def _build(self):
         central = QWidget()
@@ -79,23 +78,46 @@ class MainWindow(QMainWindow):
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(0)
 
-        splitter = QSplitter(Qt.Horizontal)
+        # Main 3-pane splitter: sidebar | chat | logs
+        self._main_splitter = QSplitter(Qt.Horizontal)
 
+        # ── Sidebar ──────────────────────────────────────
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(240)
+        sidebar.setFixedWidth(230)
         sb = QVBoxLayout(sidebar)
-        sb.setContentsMargins(0, 8, 0, 8)
-        sb.setSpacing(4)
+        sb.setContentsMargins(0, 0, 0, 0)
+        sb.setSpacing(0)
 
-        logo = QLabel("  Quadrogent")
-        logo.setStyleSheet(
-            "font-size: 15px; font-weight: 600; color: #505050; "
-            "padding: 14px 16px 12px 16px; letter-spacing: 0.5px;"
+        # Logo row
+        logo_widget = QWidget()
+        logo_widget.setObjectName("sidebarLogo")
+        logo_widget.setFixedHeight(52)
+        logo_layout = QHBoxLayout(logo_widget)
+        logo_layout.setContentsMargins(14, 0, 14, 0)
+        logo_layout.setSpacing(8)
+
+        # Try to load logo image
+        logo_img_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "images", "logo.png"
         )
-        sb.addWidget(logo)
+        if os.path.exists(logo_img_path):
+            logo_img = QLabel()
+            pix = QPixmap(logo_img_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_img.setPixmap(pix)
+            logo_img.setStyleSheet("background: transparent;")
+            logo_layout.addWidget(logo_img)
 
-        new_btn = QPushButton("+ Новый чат")
+        logo_lbl = QLabel("Quadrogent")
+        logo_lbl.setStyleSheet(
+            "font-size: 14px; font-weight: 700; color: #c8c8c8; "
+            "letter-spacing: 0.3px; background: transparent;"
+        )
+        logo_layout.addWidget(logo_lbl)
+        logo_layout.addStretch()
+        sb.addWidget(logo_widget)
+
+        new_btn = QPushButton("＋  Новый чат")
         new_btn.setObjectName("newChatBtn")
         new_btn.clicked.connect(self._new_chat)
         sb.addWidget(new_btn)
@@ -107,12 +129,14 @@ class MainWindow(QMainWindow):
         self.chat_list.customContextMenuRequested.connect(self._chat_context_menu)
         sb.addWidget(self.chat_list, 1)
 
-        settings_btn = QPushButton("Настройки")
+        settings_btn = QPushButton("⚙  Настройки")
+        settings_btn.setObjectName("settingsBtn")
         settings_btn.clicked.connect(self._open_settings)
         sb.addWidget(settings_btn)
 
-        splitter.addWidget(sidebar)
+        self._main_splitter.addWidget(sidebar)
 
+        # ── Chat + status ─────────────────────────────────
         self.chat = ChatWidget()
         self.chat.send_message.connect(self._on_send)
         self.chat.attach_file.connect(self._on_attach)
@@ -121,36 +145,50 @@ class MainWindow(QMainWindow):
         self.chat.export_chat.connect(self._on_export_chat)
         self.chat.model_changed.connect(self._on_model_changed)
         self.chat.model_refresh.connect(self._refresh_models)
-        # Docker log panel sits below the chat widget
-        chat_container = QWidget()
-        chat_vl = QVBoxLayout(chat_container)
-        chat_vl.setContentsMargins(0, 0, 0, 0)
-        chat_vl.setSpacing(0)
-        chat_vl.addWidget(self.chat, 1)
+        self.chat.persistent_toggled.connect(self._on_persistent_toggled)
+        self.chat.log_toggle_requested.connect(self._toggle_log_panel)
 
-        self.docker_log = DockerLogPanel()
-        self.docker_log.setFixedHeight(220)
-        self.docker_log.hide()
-        chat_vl.addWidget(self.docker_log)
+        self._main_splitter.addWidget(self.chat)
 
-        splitter.addWidget(chat_container)
+        # ── Right log panel ───────────────────────────────
+        self.log_panel = RightLogPanel()
+        self.log_panel.setFixedWidth(320)
+        self.log_panel.close_requested.connect(self._hide_log_panel)
+        self._main_splitter.addWidget(self.log_panel)
+        self.log_panel.hide()
 
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        ml.addWidget(splitter)
+        self._main_splitter.setStretchFactor(0, 0)
+        self._main_splitter.setStretchFactor(1, 1)
+        self._main_splitter.setStretchFactor(2, 0)
+        ml.addWidget(self._main_splitter)
 
-    # ── Docker init ───────────────────────────────────────
+    # ── Log panel toggle ───────────────────────────────────
+
+    def _toggle_log_panel(self):
+        if self.log_panel.isVisible():
+            self._hide_log_panel()
+        else:
+            self._show_log_panel()
+
+    def _show_log_panel(self):
+        self.log_panel.show()
+        self.chat.set_log_btn_active(True)
+
+    def _hide_log_panel(self):
+        self.log_panel.hide()
+        self.chat.set_log_btn_active(False)
+
+    # ── Docker init ────────────────────────────────────────
 
     def _init_docker_async(self):
-        """Bootstrap Docker container in background; show log panel; block send until ready."""
         import threading
         from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
 
         self.chat.send_btn.setEnabled(False)
-        self.docker_log.show_panel()
+        self._show_log_panel()
 
-        # Wire docker log callback → panel
-        self.agent.docker.on_log = self.docker_log.append_log
+        # Wire docker log → right panel
+        self.agent.docker.on_log = self.log_panel.append_docker_log
 
         def _set_send_enabled(val: bool):
             QMetaObject.invokeMethod(
@@ -160,24 +198,26 @@ class MainWindow(QMainWindow):
 
         def _run():
             ok = self.agent.docker.ensure_container()
-            self.docker_log.set_done(ok)
+            self.log_panel.set_docker_done(ok)
             _set_send_enabled(True)
 
         threading.Thread(target=_run, daemon=True).start()
 
-    # ── Chat list ─────────────────────────────────────────
+    # ── Chat list ──────────────────────────────────────────
 
     def _load_chats(self):
         self.chat_list.clear()
         for c in self.db.get_chats():
-            prefix = "[P] " if c["persistent"] else ""
-            mi = {"work": "[W]", "talk": "[T]", "auto": "[A]"}.get(c["mode"], "")
-            item = QListWidgetItem(f"{prefix}{mi} {c['title']}")
+            prefix = "◉ " if c["persistent"] else ""
+            mi = {"work": "[W]", "talk": "[T]", "auto": ""}.get(c["mode"], "")
+            label = f"{prefix}{mi} {c['title']}".strip()
+            item = QListWidgetItem(label)
             item.setData(Qt.UserRole, c["id"])
             self.chat_list.addItem(item)
 
     def _new_chat(self):
-        self.db.create_chat()
+        default_persistent = self.db.get_setting("default_persistent", "0") == "1"
+        self.db.create_chat(persistent=1 if default_persistent else 0)
         self._load_chats()
         self.chat_list.setCurrentRow(0)
 
@@ -191,7 +231,8 @@ class MainWindow(QMainWindow):
         title = chat_data.get("title", "Чат") if chat_data else "Чат"
         self.chat.set_chat_title(title)
         self.chat.load_messages(self.db.get_messages(chat_id))
-        self.chat.set_persistent(bool(chat_data.get("persistent", 0)))
+        is_p = bool(chat_data.get("persistent", 0)) if chat_data else False
+        self.chat.set_persistent(is_p)
 
     def _chat_context_menu(self, pos):
         item = self.chat_list.itemAt(pos)
@@ -200,7 +241,7 @@ class MainWindow(QMainWindow):
         chat_id = item.data(Qt.UserRole)
         menu = QMenu(self)
         s_act   = menu.addAction("Настройки чата")
-        exp_act = menu.addAction("Экспортировать чат…")
+        exp_act = menu.addAction("Экспортировать…")
         menu.addSeparator()
         d_act   = menu.addAction("Удалить чат")
         action = menu.exec_(self.chat_list.mapToGlobal(pos))
@@ -225,7 +266,7 @@ class MainWindow(QMainWindow):
     def _delete_chat(self, chat_id: int):
         reply = QMessageBox.question(
             self, "Удалить чат",
-            "Вы уверены, что хотите удалить этот чат?",
+            "Удалить этот чат?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
@@ -235,23 +276,22 @@ class MainWindow(QMainWindow):
                 self.chat.clear_messages()
             self._load_chats()
 
-    # ── Model switcher ────────────────────────────────────
+    def _on_persistent_toggled(self, is_persistent: bool):
+        if self.current_chat_id:
+            self.db.update_chat(self.current_chat_id, persistent=1 if is_persistent else 0)
+            self._load_chats()
+
+    # ── Model ──────────────────────────────────────────────
 
     def _refresh_models(self):
-        """Ask LM Studio for loaded models and update the selector."""
-        loaded = self.agent.llm.get_models()        # currently loaded/running
-        # LM Studio /v1/models returns only currently-loaded models.
-        # We store previously-seen model IDs in settings so the list grows.
+        loaded = self.agent.llm.get_models()
         seen_raw = self.db.get_setting("seen_models", "")
         seen: list[str] = json.loads(seen_raw) if seen_raw else []
         for m in loaded:
             if m not in seen:
                 seen.append(m)
         self.db.set_setting("seen_models", json.dumps(seen))
-
         self.chat.model_selector.set_models(loaded, seen)
-
-        # Restore saved model choice
         saved_model = self.db.get_setting("current_model", "")
         if saved_model:
             self.chat.model_selector.set_current_model(saved_model)
@@ -263,7 +303,7 @@ class MainWindow(QMainWindow):
         self.agent.llm.model = model_id
         self.db.set_setting("current_model", model_id)
 
-    # ── Messages ──────────────────────────────────────────
+    # ── Messages ───────────────────────────────────────────
 
     def _on_send(self, llm_text: str):
         if not self.current_chat_id:
@@ -317,18 +357,16 @@ class MainWindow(QMainWindow):
         if chat_id is not None:
             try:
                 self.db.add_message(
-                    chat_id,
-                    "file_card",
+                    chat_id, "file_card",
                     json.dumps({"filename": filename, "abs_path": abs_path}),
                 )
-            except Exception as e:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 
     def _on_attach(self, filepath: str):
         if not self.current_chat_id:
             self._new_chat()
-
         filename = os.path.basename(filepath)
         uploads_dir = os.path.normpath(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "uploads")
@@ -339,7 +377,6 @@ class MainWindow(QMainWindow):
             shutil.copy2(filepath, dest)
         except shutil.SameFileError:
             pass
-
         self.chat.set_pending_file(filename, dest)
 
     def _on_save_memory(self):
@@ -351,15 +388,13 @@ class MainWindow(QMainWindow):
             f"Сохранено: {summary[:60]}…" if summary else "Не удалось сохранить"
         )
 
-    # ── Export ────────────────────────────────────────────
+    # ── Export ─────────────────────────────────────────────
 
     def _on_export_chat(self, fmt: str):
-        """Called from ChatWidget export button."""
         data = self.chat.get_export_data()
         self._do_export(data, fmt)
 
     def _export_chat_by_id(self, chat_id: int):
-        """Called from sidebar context menu."""
         chat_data = self.db.get_chat(chat_id)
         messages  = self.db.get_messages(chat_id)
         raw = [
@@ -372,7 +407,6 @@ class MainWindow(QMainWindow):
             "messages": raw,
             "exported_at": datetime.now().isoformat(),
         }
-        # Ask format via small menu
         menu = QMenu(self)
         menu.addAction("🌐  HTML", lambda: self._do_export(data, "html"))
         menu.addAction("📄  TXT",  lambda: self._do_export(data, "txt"))
@@ -385,18 +419,14 @@ class MainWindow(QMainWindow):
         messages = data["messages"]
         exported = data.get("exported_at", "")
         safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "chat"
-
         ext_map = {"html": ".html", "txt": ".txt", "json": ".json"}
         ext = ext_map.get(fmt, ".txt")
-        default_name = f"{safe_title}{ext}"
-
         path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт чата", default_name,
+            self, "Экспорт чата", f"{safe_title}{ext}",
             {"html": "HTML (*.html)", "txt": "Текст (*.txt)", "json": "JSON (*.json)"}.get(fmt, "Все файлы (*)")
         )
         if not path:
             return
-
         try:
             if fmt == "json":
                 content = json.dumps(data, ensure_ascii=False, indent=2)
@@ -404,160 +434,82 @@ class MainWindow(QMainWindow):
                 content = self._export_txt(title, messages, exported)
             else:
                 content = self._export_html(title, messages, exported)
-
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
-
             self.chat.status_label.setText(f"Экспортировано: {os.path.basename(path)}")
             QTimer.singleShot(4000, lambda: self.chat.status_label.setText(""))
         except Exception as e:
             QMessageBox.critical(self, "Ошибка экспорта", str(e))
 
-    def _export_txt(self, title: str, messages: list[dict], exported: str) -> str:
+    def _export_txt(self, title, messages, exported):
         lines = [f"=== {title} ===", f"Экспортировано: {exported}", ""]
         for m in messages:
             role = "Вы" if m["role"] == "user" else "Агент"
             ts   = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
-            header = f"[{role}]" + (f"  {ts}" if ts else "")
-            lines.append(header)
+            lines.append(f"[{role}]" + (f"  {ts}" if ts else ""))
             lines.append(m["content"])
             lines.append("")
         return "\n".join(lines)
 
-    def _export_html(self, title: str, messages: list[dict], exported: str) -> str:
+    def _export_html(self, title, messages, exported):
         from src.ui.chat_widget import _md_to_html
         import html as htmllib
-
         msg_html = ""
         for m in messages:
-            role    = m["role"]
+            role = m["role"]
             content = m["content"]
-            ts      = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
+            ts = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
             ts_span = f'<span class="ts">{htmllib.escape(ts)}</span>' if ts else ""
-
             if role == "user":
                 escaped = htmllib.escape(content).replace("\n", "<br>")
                 msg_html += (
-                    f'<div class="msg user">'
-                    f'<div class="bubble user-bubble">{escaped}</div>'
-                    f'{ts_span}</div>\n'
+                    f'<div class="msg user"><div class="bubble user-bubble">{escaped}</div>{ts_span}</div>\n'
                 )
             else:
                 rendered = _md_to_html(content)
                 msg_html += (
-                    f'<div class="msg assistant">'
-                    f'<div class="label">◈ Агент</div>'
-                    f'<div class="bubble asst-bubble">{rendered}</div>'
-                    f'{ts_span}</div>\n'
+                    f'<div class="msg assistant"><div class="label">◈ Агент</div>'
+                    f'<div class="bubble asst-bubble">{rendered}</div>{ts_span}</div>\n'
                 )
-
         safe_title = htmllib.escape(title)
         safe_exported = htmllib.escape(exported[:19].replace("T", " "))
-
         return f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="ru"><head><meta charset="utf-8">
 <title>{safe_title}</title>
 <style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{
-    background: #0f0f0f; color: #c8c8c8;
-    font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-    font-size: 15px; line-height: 1.7;
-    max-width: 820px; margin: 0 auto; padding: 40px 24px 80px;
-  }}
-  header {{ border-bottom: 1px solid #1e1e1e; padding-bottom: 20px; margin-bottom: 32px; }}
-  header h1 {{ font-size: 22px; font-weight: 600; color: #e0e0e0; }}
-  header .meta {{ color: #444; font-size: 12px; margin-top: 6px; }}
-  .msg {{ margin: 18px 0; }}
-  .msg.user {{ display: flex; flex-direction: column; align-items: flex-end; }}
-  .msg.assistant {{ display: flex; flex-direction: column; align-items: flex-start; }}
-  .bubble {{
-    border-radius: 16px; padding: 12px 17px;
-    max-width: 78%; word-wrap: break-word;
-  }}
-  .user-bubble {{
-    background: #1c1c1c; border: 1px solid #282828;
-    border-radius: 16px 16px 4px 16px; color: #ececec;
-  }}
-  .asst-bubble {{
-    background: transparent; color: #c0c0c0;
-    padding: 0; max-width: 90%;
-  }}
-  .label {{ font-size: 11px; color: #383838; margin-bottom: 6px;
-            letter-spacing: 0.5px; text-transform: uppercase; }}
-  .ts {{ font-size: 10px; color: #303030; margin-top: 5px; }}
-  h1,h2,h3,h4,h5,h6 {{ color: #e0e0e0; font-weight: 600; margin: 14px 0 5px; }}
-  h1 {{ font-size: 20px; }} h2 {{ font-size: 17px; }} h3 {{ font-size: 15px; }}
-  strong {{ color: #e8e8e8; }}
-  em {{ color: #b0b0b0; font-style: italic; }}
-  a {{ color: #5599dd; text-decoration: none; }}
-  a:hover {{ text-decoration: underline; }}
-  code {{
-    background: #181818; border: 1px solid #242424;
-    padding: 1px 5px; border-radius: 4px;
-    font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; color: #b0b0b0;
-  }}
-  .code-block {{
-    margin: 10px 0; border-radius: 8px;
-    overflow: hidden; border: 1px solid #1e1e1e;
-  }}
-  .code-lang {{
-    display: block; background: #0e0e0e; color: #444; font-size: 10px;
-    padding: 4px 12px; letter-spacing: 0.5px; font-family: monospace;
-    text-transform: uppercase; border-bottom: 1px solid #1a1a1a;
-  }}
-  .code-block pre {{
-    background: #0b0b0b; padding: 12px 14px; margin: 0;
-  }}
-  .code-block pre code {{
-    background: none; border: none; padding: 0; color: #909090;
-  }}
-  pre {{
-    background: #0b0b0b; border: 1px solid #1c1c1c;
-    padding: 12px 14px; border-radius: 8px;
-    font-family: "JetBrains Mono", Consolas, monospace;
-    color: #888; margin: 8px 0; white-space: pre-wrap;
-  }}
-  ul, ol {{ padding-left: 22px; margin: 6px 0; }}
-  li {{ margin: 3px 0; color: #c0c0c0; }}
-  hr {{ border: none; border-top: 1px solid #252525; margin: 12px 0; }}
-  .blockquote {{
-    border-left: 3px solid #333; padding: 4px 12px;
-    color: #888; margin: 6px 0; font-style: italic;
-  }}
-</style>
-</head>
-<body>
-<header>
-  <h1>◈ {safe_title}</h1>
-  <div class="meta">Экспортировано {safe_exported} · Quadrogent</div>
-</header>
-{msg_html}
-</body>
-</html>"""
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0a0a0a;color:#c4c4c4;font-family:"Inter",system-ui,sans-serif;
+font-size:15px;line-height:1.7;max-width:820px;margin:0 auto;padding:40px 24px 80px}}
+header{{border-bottom:1px solid #1a1a1a;padding-bottom:20px;margin-bottom:32px}}
+header h1{{font-size:22px;font-weight:700;color:#e0e0e0}}
+header .meta{{color:#333;font-size:12px;margin-top:6px}}
+.msg{{margin:18px 0}}
+.msg.user{{display:flex;flex-direction:column;align-items:flex-end}}
+.msg.assistant{{display:flex;flex-direction:column;align-items:flex-start}}
+.bubble{{border-radius:14px;padding:11px 16px;max-width:78%;word-wrap:break-word}}
+.user-bubble{{background:#161616;border:1px solid #242424;border-radius:14px 14px 3px 14px;color:#eeeeee}}
+.asst-bubble{{background:transparent;color:#bdbdbd;padding:0;max-width:92%}}
+.label{{font-size:11px;color:#303030;margin-bottom:6px;letter-spacing:0.5px;text-transform:uppercase}}
+.ts{{font-size:10px;color:#262626;margin-top:5px}}
+</style></head><body>
+<header><h1>{safe_title}</h1><div class="meta">Quadrogent · {safe_exported}</div></header>
+{msg_html}</body></html>"""
 
-    # ── Settings ──────────────────────────────────────────
+    # ── Settings ───────────────────────────────────────────
 
     def _open_settings(self):
         dlg = AppSettingsDialog(self.db, self)
         if dlg.exec_():
             url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
             self.agent.llm.base_url = url
-            # Refresh models after settings change
             QTimer.singleShot(200, self._refresh_models)
 
     def closeEvent(self, event):
-        # Stop the agent immediately — abort LLM stream so the thread exits fast
         if self.worker and self.worker.isRunning():
             self.agent.stop()
-            # Give the worker up to 2 s to finish cleanly; if not, terminate it
             if not self.worker.wait(2000):
                 self.worker.terminate()
                 self.worker.wait(1000)
-        # Stop Docker container in a daemon thread so the window closes instantly
         import threading
         threading.Thread(target=self.agent.docker.stop, daemon=True).start()
         self.db.close()
