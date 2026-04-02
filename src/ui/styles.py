@@ -577,6 +577,37 @@ pre code { background: none; border: none; padding: 0; }
     border-radius: 3px;
 }
 
+
+/* ── Tool output improvements ── */
+.tool-header { display: flex; align-items: center; gap: 8px; }
+.tool-name {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+}
+.tool-header-ok .tool-name { color: #3a6a3a; }
+.tool-header-err .tool-name { color: #7a3030; }
+
+.ec-ok {
+    font-size: 10px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    color: #2e5a2e;
+    background: #0d1a0d;
+    border: 1px solid #1a3a1a;
+    border-radius: 3px;
+    padding: 0px 5px;
+}
+.ec-err {
+    font-size: 10px;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    color: #7a2020;
+    background: #1a0808;
+    border: 1px solid #3a1010;
+    border-radius: 3px;
+    padding: 0px 5px;
+}
+
 </style>
 """
 

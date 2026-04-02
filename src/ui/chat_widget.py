@@ -796,11 +796,37 @@ class ChatWidget(QWidget):
         self._render()
 
     def _append_tool(self, tool_name: str, content: str):
-        escaped = html.escape(content)
+        import re as _re
+
+        # Detect exit code to colour the header
+        ec_match = _re.search(r'\[exit code:\s*(-?\d+)\]', content)
+        exit_code = int(ec_match.group(1)) if ec_match else None
+        if exit_code is None:
+            header_class = "tool-header"
+        elif exit_code == 0:
+            header_class = "tool-header tool-header-ok"
+        else:
+            header_class = "tool-header tool-header-err"
+
+        # Exit code badge
+        if exit_code is not None:
+            badge_cls = "ec-ok" if exit_code == 0 else "ec-err"
+            ec_badge = f' <span class="{badge_cls}">exit {exit_code}</span>'
+        else:
+            ec_badge = ""
+
+        # Strip the [exit code: N] prefix from display body
+        body = _re.sub(r'^\[exit code:\s*-?\d+\]\n?', '', content).strip()
+        escaped_body = html.escape(body) if body else "(нет вывода)"
+
         block = (
             f'<div class="tool-wrap">'
-            f'<div class="tool-header">&gt; {html.escape(tool_name)}</div>'
-            f'<div class="tool-body">{escaped}</div></div>'
+            f'<div class="{header_class}">'
+            f'<span class="tool-name">{html.escape(tool_name)}</span>'
+            f'{ec_badge}'
+            f'</div>'
+            f'<div class="tool-body">{escaped_body}</div>'
+            f'</div>'
         )
         self._messages_html += block
         self._render()

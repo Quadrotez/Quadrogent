@@ -17,6 +17,7 @@ from src.core.agent import Agent
 from src.ui.chat_widget import ChatWidget
 from src.ui.settings_dialog import ChatSettingsDialog, AppSettingsDialog
 from src.ui.styles import DARK_THEME
+from src.ui.docker_log_panel import DockerLogPanel
 
 
 class AgentWorker(QThread):
@@ -120,7 +121,19 @@ class MainWindow(QMainWindow):
         self.chat.export_chat.connect(self._on_export_chat)
         self.chat.model_changed.connect(self._on_model_changed)
         self.chat.model_refresh.connect(self._refresh_models)
-        splitter.addWidget(self.chat)
+        # Docker log panel sits below the chat widget
+        chat_container = QWidget()
+        chat_vl = QVBoxLayout(chat_container)
+        chat_vl.setContentsMargins(0, 0, 0, 0)
+        chat_vl.setSpacing(0)
+        chat_vl.addWidget(self.chat, 1)
+
+        self.docker_log = DockerLogPanel()
+        self.docker_log.setFixedHeight(220)
+        self.docker_log.hide()
+        chat_vl.addWidget(self.docker_log)
+
+        splitter.addWidget(chat_container)
 
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -129,19 +142,15 @@ class MainWindow(QMainWindow):
     # ── Docker init ───────────────────────────────────────
 
     def _init_docker_async(self):
-        """Bootstrap Docker container in background; block send until ready."""
+        """Bootstrap Docker container in background; show log panel; block send until ready."""
         import threading
         from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
 
-        # Disable send while sandbox is not ready
         self.chat.send_btn.setEnabled(False)
-        self.chat.status_label.setText("🐳 Подготовка контейнера…")
+        self.docker_log.show_panel()
 
-        def _set_status(msg):
-            QMetaObject.invokeMethod(
-                self.chat.status_label, "setText",
-                _Qt.QueuedConnection, Q_ARG(str, msg),
-            )
+        # Wire docker log callback → panel
+        self.agent.docker.on_log = self.docker_log.append_log
 
         def _set_send_enabled(val: bool):
             QMetaObject.invokeMethod(
@@ -150,15 +159,9 @@ class MainWindow(QMainWindow):
             )
 
         def _run():
-            _set_status("🐳 Подготовка контейнера…")
             ok = self.agent.docker.ensure_container()
-            if ok:
-                _set_status("✓ Контейнер готов")
-                _set_send_enabled(True)
-                QTimer.singleShot(2500, lambda: self.chat.status_label.setText(""))
-            else:
-                _set_status("⚠ Docker недоступен — команды не работают")
-                _set_send_enabled(True)  # still allow Talk mode
+            self.docker_log.set_done(ok)
+            _set_send_enabled(True)
 
         threading.Thread(target=_run, daemon=True).start()
 
