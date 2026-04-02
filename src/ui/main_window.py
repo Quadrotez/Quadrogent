@@ -230,8 +230,15 @@ class MainWindow(QMainWindow):
             self.agent.stop()
 
     def _on_file_ready(self, filename: str, abs_path: str):
-        """Show a file card in chat — no popup dialog."""
+        """Show a file card in chat and save it to DB so it survives reload."""
         self.chat.add_file_card(filename, abs_path)
+        if self.current_chat_id:
+            import json
+            self.db.add_message(
+                self.current_chat_id,
+                "file_card",
+                json.dumps({"filename": filename, "abs_path": abs_path}),
+            )
 
     def _on_attach(self, filepath: str):
         """Copy file to uploads, show chip in input area."""

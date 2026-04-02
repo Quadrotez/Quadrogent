@@ -1,5 +1,7 @@
 import html
+import json
 import os
+import re
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
     QTextEdit, QPushButton, QLabel, QFileDialog,
@@ -9,6 +11,66 @@ from PyQt5.QtCore import Qt, pyqtSignal, QEvent
 from PyQt5.QtGui import QKeyEvent
 
 from src.ui.styles import MESSAGE_CSS
+
+
+# ── Markdown → HTML (lightweight, QTextBrowser-safe) ─────────────────────────
+
+def _md_to_html(text: str) -> str:
+    """
+    Convert a subset of Markdown to HTML that QTextBrowser can render.
+    Handles: code blocks, inline code, headers, bold, italic,
+             unordered/ordered lists, blockquotes, horizontal rules, links.
+    """
+    # 1. Fenced code blocks  ```lang\n...\n```
+    def _fence(m):
+        lang = html.escape(m.group(1).strip())
+        code = html.escape(m.group(2))
+        label = f'<span class="code-lang">{lang}</span>' if lang else ""
+        return f'<div class="code-block">{label}<pre><code>{code}</code></pre></div>'
+
+    text = re.sub(r"```(\w*)\n(.*?)```", _fence, text, flags=re.DOTALL)
+
+    # 2. Escape HTML in remaining text (but skip already-escaped <div>/<pre> blocks)
+    #    Strategy: split on block-level HTML we just inserted, escape the rest
+    parts = re.split(r"(<div class=\"code-block\">.*?</div>)", text, flags=re.DOTALL)
+    result_parts = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:          # already HTML block
+            result_parts.append(part)
+        else:
+            # Inline escaping + inline markdown
+            p = html.escape(part)
+            # Inline code  `code`
+            p = re.sub(r"`([^`\n]+)`", r'<code>\1</code>', p)
+            # Bold **text** or __text__
+            p = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", p)
+            p = re.sub(r"__(.+?)__",     r"<strong>\1</strong>", p)
+            # Italic *text* or _text_
+            p = re.sub(r"\*([^*\n]+)\*", r"<em>\1</em>", p)
+            p = re.sub(r"_([^_\n]+)_",   r"<em>\1</em>", p)
+            # Links [text](url)
+            p = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', p)
+            # Horizontal rule ---
+            p = re.sub(r"(?m)^-{3,}\s*$", "<hr>", p)
+            # Headers (must be at line start)
+            p = re.sub(r"(?m)^#{6}\s+(.+)$", r"<h6>\1</h6>", p)
+            p = re.sub(r"(?m)^#{5}\s+(.+)$", r"<h5>\1</h5>", p)
+            p = re.sub(r"(?m)^#{4}\s+(.+)$", r"<h4>\1</h4>", p)
+            p = re.sub(r"(?m)^#{3}\s+(.+)$", r"<h3>\1</h3>", p)
+            p = re.sub(r"(?m)^#{2}\s+(.+)$", r"<h2>\1</h2>", p)
+            p = re.sub(r"(?m)^#\s+(.+)$",    r"<h1>\1</h1>", p)
+            # Blockquote > text
+            p = re.sub(r"(?m)^&gt;\s*(.+)$", r'<div class="blockquote">\1</div>', p)
+            # Unordered list items  - item  or  * item
+            p = re.sub(r"(?m)^[\*\-]\s+(.+)$", r"<li>\1</li>", p)
+            # Ordered list items  1. item
+            p = re.sub(r"(?m)^\d+\.\s+(.+)$", r"<li>\1</li>", p)
+            # Wrap consecutive <li> in <ul>
+            p = re.sub(r"(<li>.*?</li>(\n|$))+", lambda m: "<ul>" + m.group(0) + "</ul>", p, flags=re.DOTALL)
+            # Newlines → <br> (but not inside block elements)
+            p = p.replace("\n", "<br>")
+            result_parts.append(p)
+    return "".join(result_parts)
 
 
 # ── File icon helper ──────────────────────────────────────────────────────────
@@ -290,6 +352,12 @@ class ChatWidget(QWidget):
                 self._append_message("assistant", content)
             elif role == "tool":
                 self._append_tool(m.get("tool", "tool"), content)
+            elif role == "file_card":
+                try:
+                    data = json.loads(content)
+                    self.add_file_card(data["filename"], data["abs_path"])
+                except Exception:
+                    pass
 
     def add_user_message(self, text: str):
         """Used when loading history or in edge cases without file."""
@@ -355,10 +423,10 @@ class ChatWidget(QWidget):
 
     def end_stream(self):
         if self._streaming_text:
-            escaped = html.escape(self._streaming_text).replace("\n", "<br>")
+            rendered = _md_to_html(self._streaming_text)
             block = (
                 f'<div class="msg-wrap assistant">'
-                f'<div class="bubble-assistant">{escaped}</div></div>'
+                f'<div class="bubble-assistant">{rendered}</div></div>'
             )
             self._messages_html = self._streaming_base + block
             self._render()
@@ -393,21 +461,23 @@ class ChatWidget(QWidget):
         self._render()
 
     def _append_message(self, css_class: str, content: str):
-        escaped = html.escape(content).replace("\n", "<br>")
         if css_class == "user":
+            escaped = html.escape(content).replace("\n", "<br>")
             block = (
                 f'<div class="msg-wrap user">'
                 f'<div class="bubble-user">{escaped}</div></div>'
             )
         elif css_class == "error":
+            escaped = html.escape(content).replace("\n", "<br>")
             block = (
                 f'<div class="msg-wrap error">'
                 f'<div class="bubble-error">{escaped}</div></div>'
             )
         else:
+            rendered = _md_to_html(content)
             block = (
                 f'<div class="msg-wrap assistant">'
-                f'<div class="bubble-assistant">{escaped}</div></div>'
+                f'<div class="bubble-assistant">{rendered}</div></div>'
             )
         self._messages_html += block
         self._render()

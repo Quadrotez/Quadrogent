@@ -15,19 +15,21 @@ SYSTEM_WORK = """Ты — Quadrogent, ИИ-агент с открытым исх
 1. Составь чёткий план действий и сообщи его пользователю.
 2. Выполняй план шаг за шагом, используя доступные инструменты.
 3. Не останавливайся, пока задача не будет выполнена.
-4. Не говори "я не могу" — используй инструменты для решения.
+4. Никогда не говори "я не могу" — всегда используй инструменты.
 5. Когда задача полностью выполнена, напиши "ready" на отдельной строке.
 
 Доступные инструменты:
-- execute_command: выполнить команду Linux в Docker-контейнере (root, есть интернет)
+- execute_command: выполнить команду Linux в Docker (root, интернет есть). Рабочая директория /workspace, папка uploads доступна как /workspace/uploads
 - web_search: поиск в интернете
-- read_file: прочитать файл из папки uploads/ (только имя файла, например "report.pdf")
-- write_file: записать файл в uploads/ (только имя файла, например "result.py") — файл автоматически доставляется пользователю
+- read_file: прочитать файл из uploads/ по имени файла (например "report.pdf")
+- write_file: записать файл в uploads/ — пользователь получит кнопку скачать
+- delete_file: удалить файл или папку из uploads/ (для очистки всего используй путь "." )
+- list_files: получить список файлов в папке uploads/
 """
 
 SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
 Режим: Talk. Ты ведёшь обычный диалог с пользователем.
-Отвечай по существу, кратко и понятно.
+Отвечай по существу, кратко и понятно. Используй markdown для форматирования.
 """
 
 SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
@@ -38,13 +40,15 @@ SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исх
 2. Выполняй, используя инструменты.
 3. Когда готово — напиши "ready".
 
-Если это обычный вопрос или разговор — просто ответь.
+Если это обычный вопрос или разговор — просто ответь. Используй markdown для форматирования.
 
 Доступные инструменты:
-- execute_command: выполнить команду Linux в Docker-контейнере (root, есть интернет)
+- execute_command: команда Linux в Docker (root, интернет). Рабочая директория /workspace, uploads → /workspace/uploads
 - web_search: поиск в интернете
-- read_file: прочитать файл из папки uploads/ (только имя файла)
-- write_file: записать файл в uploads/ (только имя файла) — файл автоматически доставляется пользователю
+- read_file: прочитать файл из uploads/ по имени
+- write_file: записать файл в uploads/ — пользователь получит кнопку скачать
+- delete_file: удалить файл или папку из uploads/ (путь "." — очистить всё)
+- list_files: список файлов в uploads/
 """
 
 MEMORY_SUMMARIZE_PROMPT = """Проанализируй этот диалог и напиши краткое резюме (1-3 предложения) — что было обсуждено и к каким выводам пришли. Только суть, без лишних слов."""
@@ -131,6 +135,44 @@ class Agent:
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
                 return f"Error writing file: {e}"
+
+        elif name == "delete_file":
+            path = arguments.get("path", "").strip()
+            try:
+                if path in (".", "", "/"):
+                    # Clear all contents of uploads dir
+                    import os, shutil
+                    base = os.path.abspath(self.files.base_dir)
+                    deleted = []
+                    for entry in os.listdir(base):
+                        entry_path = os.path.join(base, entry)
+                        if os.path.isdir(entry_path):
+                            shutil.rmtree(entry_path)
+                        else:
+                            os.remove(entry_path)
+                        deleted.append(entry)
+                    result = f"Cleared uploads/: deleted {len(deleted)} item(s): {', '.join(deleted)}" if deleted else "uploads/ was already empty"
+                else:
+                    self.files.delete(path)
+                    result = f"Deleted: {path}"
+                self._emit_tool(name, path, result)
+                return result
+            except Exception as e:
+                self._emit_tool(name, path, f"Error: {e}")
+                return f"Error deleting file: {e}"
+
+        elif name == "list_files":
+            try:
+                files = self.files.list_files()
+                if files:
+                    result = "Files in uploads/:\n" + "\n".join(f"  {f}" for f in files)
+                else:
+                    result = "uploads/ is empty"
+                self._emit_tool(name, "", result)
+                return result
+            except Exception as e:
+                self._emit_tool(name, "", f"Error: {e}")
+                return f"Error listing files: {e}"
 
         return f"Unknown tool: {name}"
 

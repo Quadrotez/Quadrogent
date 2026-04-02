@@ -11,8 +11,9 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "execute_command",
-            "description": "Execute a Linux command inside the Docker sandbox with root privileges. "
-                           "Use for any file operations, installing packages, running scripts, compiling code, etc.",
+            "description": "Execute a Linux command inside the Docker sandbox with root privileges and internet access. "
+                           "Working directory is /workspace. The uploads folder is mounted at /workspace/uploads. "
+                           "Use for running scripts, compiling code, installing packages, complex file operations, etc.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -63,7 +64,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write content to a file in the uploads directory and deliver it to the user.",
+            "description": "Write content to a file in the uploads directory and deliver it to the user as a download.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -77,6 +78,35 @@ TOOLS = [
                     }
                 },
                 "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "Delete a file or folder from the uploads directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File or folder name relative to uploads directory. "
+                                       "Use '.' or '' to clear all contents of uploads."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "List all files in the uploads directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         }
     }
@@ -156,6 +186,7 @@ class LLMClient:
             timeout=300,
         )
         r.raise_for_status()
+        r.encoding = "utf-8"  # Force UTF-8 — prevents Cyrillic/emoji mojibake
 
         # Assemble tool-call fragments: index -> {id, name, arguments}
         tc_asm: dict[int, dict] = {}
