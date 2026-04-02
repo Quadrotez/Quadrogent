@@ -14,18 +14,15 @@ SYSTEM_WORK = """Ты — Quadrogent, ИИ-агент с открытым исх
 Правила:
 1. Составь чёткий план действий и сообщи его пользователю.
 2. Выполняй план шаг за шагом, используя доступные инструменты.
-3. Ты можешь выполнять несколько команд подряд, анализируя результат каждой.
-4. Не останавливайся, пока задача не будет выполнена.
-5. Не говори "я не могу" — используй инструменты для решения.
-6. Когда задача полностью выполнена, напиши "ready" на отдельной строке.
+3. Не останавливайся, пока задача не будет выполнена.
+4. Не говори "я не могу" — используй инструменты для решения.
+5. Когда задача полностью выполнена, напиши "ready" на отдельной строке.
 
 Доступные инструменты:
 - execute_command: выполнить команду Linux в Docker-контейнере (root, есть интернет)
 - web_search: поиск в интернете
-- read_file: прочитать файл из uploads/
-- write_file: записать файл в uploads/
-
-Директория для файлов: /workspace/uploads (внутри контейнера) = ./uploads (снаружи)
+- read_file: прочитать файл из папки uploads/ (только имя файла, например "report.pdf")
+- write_file: записать файл в uploads/ (только имя файла, например "result.py") — файл автоматически доставляется пользователю
 """
 
 SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
@@ -36,7 +33,7 @@ SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исх
 SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
 Режим: Auto. Определи сам, нужно ли использовать инструменты для этого запроса.
 
-Если задача требует действий (код, файлы, поиск, команды) — работай как в режиме Work:
+Если задача требует действий (код, файлы, поиск, команды) — работай автономно:
 1. Составь план, сообщи пользователю.
 2. Выполняй, используя инструменты.
 3. Когда готово — напиши "ready".
@@ -46,8 +43,8 @@ SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исх
 Доступные инструменты:
 - execute_command: выполнить команду Linux в Docker-контейнере (root, есть интернет)
 - web_search: поиск в интернете
-- read_file: прочитать файл из uploads/
-- write_file: записать файл в uploads/
+- read_file: прочитать файл из папки uploads/ (только имя файла)
+- write_file: записать файл в uploads/ (только имя файла) — файл автоматически доставляется пользователю
 """
 
 MEMORY_SUMMARIZE_PROMPT = """Проанализируй этот диалог и напиши краткое резюме (1-3 предложения) — что было обсуждено и к каким выводам пришли. Только суть, без лишних слов."""
@@ -62,15 +59,19 @@ class Agent:
         self.docker = DockerManager()
         self.search = WebSearch()
         self.files = FileManager()
-        self.on_message: Callable[[str, str], None] | None = None  # (role, content)
-        self.on_tool_call: Callable[[str, str, str], None] | None = None  # (name, args, result)
-        self.on_stream_start: Callable[[], None] | None = None
-        self.on_stream_delta: Callable[[str], None] | None = None
-        self.on_stream_end: Callable[[], None] | None = None
+        self.on_message:      Callable[[str, str], None]       | None = None
+        self.on_tool_call:    Callable[[str, str, str], None]  | None = None
+        self.on_stream_start: Callable[[], None]               | None = None
+        self.on_stream_delta: Callable[[str], None]            | None = None
+        self.on_stream_end:   Callable[[], None]               | None = None
+        # (filename, abs_path) — emitted when write_file succeeds
+        self.on_file_ready:   Callable[[str, str], None]       | None = None
         self._stop = False
 
     def stop(self):
         self._stop = True
+
+    # ── Callbacks ─────────────────────────────────────────
 
     def _emit(self, role: str, content: str):
         if self.on_message:
@@ -80,6 +81,8 @@ class Agent:
         if self.on_tool_call:
             self.on_tool_call(name, args, result)
 
+    # ── System prompt ─────────────────────────────────────
+
     def _get_system_prompt(self, mode: str) -> str:
         memories = self.db.get_memories_text()
         base = {"work": SYSTEM_WORK, "talk": SYSTEM_TALK, "auto": SYSTEM_AUTO}.get(
@@ -88,6 +91,8 @@ class Agent:
         if memories:
             base += f"\n\n{memories}"
         return base
+
+    # ── Tool execution ────────────────────────────────────
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         if name == "execute_command":
@@ -108,7 +113,7 @@ class Agent:
             path = arguments.get("path", "")
             try:
                 content = self.files.read(path)
-                self._emit_tool(name, path, f"[{len(content)} chars]")
+                self._emit_tool(name, path, f"[{len(content)} chars read]")
                 return content
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
@@ -118,23 +123,25 @@ class Agent:
             path = arguments.get("path", "")
             content = arguments.get("content", "")
             try:
-                self.files.write(path, content)
-                self._emit_tool(name, path, "OK")
-                return f"File written: {path}"
+                abs_path = self.files.write(path, content)
+                self._emit_tool(name, path, f"Written → {abs_path}")
+                if self.on_file_ready:
+                    self.on_file_ready(path, abs_path)
+                return f"File written: {abs_path}"
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
                 return f"Error writing file: {e}"
 
         return f"Unknown tool: {name}"
 
+    # ── Main agent loop ───────────────────────────────────
+
     def run(self, chat_id: int, user_message: str, mode: str = "auto"):
         """Run the agent loop for a user message."""
         self._stop = False
 
-        # Save user message
         self.db.add_message(chat_id, "user", user_message)
 
-        # Build conversation history
         system = self._get_system_prompt(mode)
         db_messages = self.db.get_messages(chat_id)
         messages = [{"role": "system", "content": system}]
@@ -142,88 +149,71 @@ class Agent:
             if m["role"] in ("user", "assistant"):
                 messages.append({"role": m["role"], "content": m["content"]})
             elif m["role"] == "tool":
-                messages.append({"role": "assistant", "content": m["content"]})
+                messages.append({"role": "user", "content": m["content"]})
 
         use_tools = mode in ("work", "auto")
-        max_iterations = 25  # safety limit
+        max_iterations = 25
 
         for _ in range(max_iterations):
             if self._stop:
                 break
 
-            # First try non-streaming request when tools are expected,
-            # because streaming + tool_calls is unreliable in many backends.
-            # For pure text generation, use streaming.
             try:
-                if use_tools:
-                    # Non-streaming call to handle tool_calls reliably
-                    response = self.llm.chat(messages, use_tools=True, stream=False)
-                    content = response.get("content", "") or ""
-                    tool_calls = response.get("tool_calls")
+                if self.on_stream_start:
+                    self.on_stream_start()
 
-                    if content.strip():
-                        # Stream-like emit: send content in chunks for visual effect
-                        if self.on_stream_start:
-                            self.on_stream_start()
-                        chunk_size = 4
-                        for i in range(0, len(content), chunk_size):
-                            if self._stop:
-                                break
-                            chunk = content[i:i + chunk_size]
-                            if self.on_stream_delta:
-                                self.on_stream_delta(chunk)
-                        if self.on_stream_end:
-                            self.on_stream_end()
-                        self.db.add_message(chat_id, "assistant", content)
-                        messages.append({"role": "assistant", "content": content})
+                full_content = ""
+                tool_calls = None
 
-                    if not tool_calls:
+                for item in self.llm.chat(messages, use_tools=use_tools, stream=True):
+                    if self._stop:
                         break
-                    if "ready" in content.lower().split():
-                        break
-
-                    # Process tool calls
-                    for tc in tool_calls:
-                        if self._stop:
-                            break
-                        func = tc.get("function", {})
-                        name = func.get("name", "")
-                        try:
-                            args = json.loads(func.get("arguments", "{}"))
-                        except json.JSONDecodeError:
-                            args = {}
-                        result = self._execute_tool(name, args)
-                        tool_msg = f"[Tool: {name}]\n{result}"
-                        messages.append({"role": "user", "content": tool_msg})
-                        self.db.add_message(chat_id, "tool", tool_msg, tool=name)
-
-                else:
-                    # Pure talk mode — use real streaming
-                    if self.on_stream_start:
-                        self.on_stream_start()
-                    full_content = ""
-                    for delta in self.llm.chat(messages, use_tools=False, stream=True):
-                        if self._stop:
-                            break
-                        text_chunk = delta.get("content", "")
-                        if text_chunk:
-                            full_content += text_chunk
+                    if item.get("type") == "delta":
+                        text = item.get("content", "")
+                        if text:
+                            full_content += text
                             if self.on_stream_delta:
-                                self.on_stream_delta(text_chunk)
-                    if self.on_stream_end:
-                        self.on_stream_end()
-                    if full_content.strip():
-                        self.db.add_message(chat_id, "assistant", full_content)
-                    break  # Talk mode — single response, no loop
+                                self.on_stream_delta(text)
+                    elif item.get("type") == "tool_calls":
+                        tool_calls = item["tool_calls"]
+
+                if self.on_stream_end:
+                    self.on_stream_end()
+
+                if full_content.strip():
+                    self.db.add_message(chat_id, "assistant", full_content)
+                    messages.append({"role": "assistant", "content": full_content})
+
+                # No tools or talk mode → done
+                if not use_tools or not tool_calls:
+                    break
+                if "ready" in full_content.lower().split():
+                    break
+
+                # Process tool calls
+                for tc in tool_calls:
+                    if self._stop:
+                        break
+                    func = tc.get("function", {})
+                    name = func.get("name", "")
+                    try:
+                        args = json.loads(func.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        args = {}
+                    result = self._execute_tool(name, args)
+                    tool_msg = f"[Tool: {name}]\n{result}"
+                    messages.append({"role": "user", "content": tool_msg})
+                    self.db.add_message(chat_id, "tool", tool_msg, tool=name)
 
             except Exception as e:
+                if self.on_stream_end:
+                    self.on_stream_end()
                 error_msg = f"Ошибка подключения к LLM: {e}"
                 self._emit("error", error_msg)
                 self.db.add_message(chat_id, "assistant", error_msg)
                 return
 
     def summarize_chat(self, chat_id: int) -> str:
-        """Generate a summary for a persistent chat's memory."""
         db_messages = self.db.get_messages(chat_id)
         if not db_messages:
             return ""
@@ -238,7 +228,7 @@ class Agent:
         ]
 
         try:
-            response = self.llm.chat(messages, use_tools=False)
+            response = self.llm.chat(messages, use_tools=False, stream=False)
             summary = response.get("content", "").strip()
             if summary:
                 self.db.save_memory(chat_id, summary)

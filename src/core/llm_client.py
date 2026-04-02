@@ -52,7 +52,7 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File path relative to the uploads directory"
+                        "description": "File name only (e.g. 'report.pdf'), relative to the uploads directory"
                     }
                 },
                 "required": ["path"]
@@ -63,13 +63,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write content to a file in the uploads directory.",
+            "description": "Write content to a file in the uploads directory and deliver it to the user.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File path relative to the uploads directory"
+                        "description": "File name only (e.g. '123.py'), relative to the uploads directory"
                     },
                     "content": {
                         "type": "string",
@@ -109,7 +109,7 @@ class LLMClient:
         self,
         messages: list[dict],
         use_tools: bool = False,
-        stream: bool = False,
+        stream: bool = True,
         temperature: float = 0.7,
     ) -> dict | Generator:
         payload = {
@@ -127,6 +127,7 @@ class LLMClient:
             return self._complete(payload)
 
     def _complete(self, payload: dict) -> dict:
+        """Non-streaming call, used for summarize_chat."""
         r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
@@ -143,6 +144,11 @@ class LLMClient:
         }
 
     def _stream(self, payload: dict) -> Generator:
+        """
+        Stream response. Yields dicts of two types:
+          {"type": "delta",      "content": str}          — text chunk
+          {"type": "tool_calls", "tool_calls": list[dict]} — assembled tool calls (end of stream)
+        """
         r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
@@ -150,6 +156,10 @@ class LLMClient:
             timeout=300,
         )
         r.raise_for_status()
+
+        # Assemble tool-call fragments: index -> {id, name, arguments}
+        tc_asm: dict[int, dict] = {}
+
         for line in r.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data: "):
                 continue
@@ -158,7 +168,37 @@ class LLMClient:
                 break
             try:
                 chunk = json.loads(data_str)
-                delta = chunk["choices"][0].get("delta", {})
-                yield delta
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
+
+                # ── Content delta ──────────────────────────────
+                text = delta.get("content") or ""
+                if text:
+                    yield {"type": "delta", "content": text}
+
+                # ── Tool-call fragments ────────────────────────
+                for tc in delta.get("tool_calls", []):
+                    idx = tc.get("index", 0)
+                    if idx not in tc_asm:
+                        tc_asm[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc.get("id"):
+                        tc_asm[idx]["id"] = tc["id"]
+                    func = tc.get("function", {})
+                    tc_asm[idx]["name"]      += func.get("name", "")      or ""
+                    tc_asm[idx]["arguments"] += func.get("arguments", "") or ""
+
             except (json.JSONDecodeError, KeyError, IndexError):
                 continue
+
+        # Yield assembled tool calls (if any)
+        if tc_asm:
+            tool_calls = [
+                {
+                    "function": {
+                        "name":      tc_asm[i]["name"],
+                        "arguments": tc_asm[i]["arguments"],
+                    }
+                }
+                for i in sorted(tc_asm.keys())
+            ]
+            yield {"type": "tool_calls", "tool_calls": tool_calls}
