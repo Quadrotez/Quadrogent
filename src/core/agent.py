@@ -128,6 +128,27 @@ class Agent:
     def _execute_tool(self, name: str, arguments: dict) -> str:
         if name == "execute_command":
             cmd = arguments.get("command", "")
+            # Intercept raw apt-get calls — route them through the safe apt handler
+            # so lock conflicts and retries are handled properly
+            import re as _re
+            _apt_pat = _re.compile(
+                r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", _re.MULTILINE
+            )
+            if _apt_pat.search(cmd):
+                # Extract package names from simple "apt-get install [-flags] pkg1 pkg2" patterns
+                pkg_match = _re.search(
+                    r"apt(?:-get)?\s+install\s+(?:-[^\s]+\s+)*(.+?)(?:\s*&&|\s*\||\s*2>&1|$)",
+                    cmd, _re.DOTALL,
+                )
+                if pkg_match:
+                    pkgs = pkg_match.group(1).strip().split()
+                    # Filter out flags (start with -)
+                    pkgs = [p for p in pkgs if not p.startswith("-") and p != "2>&1"]
+                    if pkgs:
+                        exit_code, output = self.docker.execute_apt(" ".join(pkgs))
+                        result = f"[install_packages intercepted apt-get | exit code: {exit_code}]\n{output}"
+                        self._emit_tool(name, cmd, result)
+                        return result
             exit_code, output = self.docker.execute(cmd)
             result = f"[exit code: {exit_code}]\n{output}"
             self._emit_tool(name, cmd, result)
@@ -210,12 +231,8 @@ class Agent:
                 cmd = f"pip3 install --quiet {packages} 2>&1"
                 exit_code, output = self.docker.execute(cmd)
             else:
-                # apt: ensure update ran first, then install non-interactively
-                cmd = (
-                    f"apt-get update -qq 2>&1 && "
-                    f"apt-get install -y --no-install-recommends {packages} 2>&1"
-                )
-                exit_code, output = self.docker.execute(cmd)
+                # Use the safe apt handler: handles lock wait, update, retry
+                exit_code, output = self.docker.execute_apt(packages)
             status = "OK" if exit_code == 0 else f"exit code {exit_code}"
             result = f"[{status}]\n{output}" if output else f"[{status}]"
             self._emit_tool(name, f"{manager}: {packages}", result)

@@ -1,36 +1,36 @@
 DARK_THEME = """
 QMainWindow, QDialog {
-    background-color: #0f0f0f;
-    color: #e8e8e8;
+    background-color: #0d0d0d;
+    color: #ececec;
 }
 
 QWidget {
-    background-color: #0f0f0f;
-    color: #e8e8e8;
-    font-family: "Inter", "Segoe UI", "SF Pro Display", "Helvetica Neue", sans-serif;
+    background-color: #0d0d0d;
+    color: #ececec;
+    font-family: "Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;
     font-size: 14px;
 }
 
-/* Sidebar */
+/* ── Sidebar ── */
 #sidebar {
     background-color: #080808;
-    border-right: 1px solid #1e1e1e;
+    border-right: 1px solid #161616;
 }
 
 #sidebar QPushButton {
     background-color: transparent;
-    color: #777777;
+    color: #6b6b6b;
     border: none;
-    padding: 9px 14px;
+    padding: 8px 12px;
     text-align: left;
     font-size: 13px;
-    border-radius: 8px;
-    margin: 1px 8px;
+    border-radius: 6px;
+    margin: 1px 6px;
 }
 
 #sidebar QPushButton:hover {
-    background-color: #141414;
-    color: #cccccc;
+    background-color: #131313;
+    color: #c0c0c0;
 }
 
 #chatList {
@@ -40,99 +40,103 @@ QWidget {
 }
 
 #chatList::item {
-    padding: 9px 14px;
-    border-radius: 8px;
-    color: #888888;
-    margin: 2px 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    color: #6b6b6b;
+    margin: 1px 6px;
+    font-size: 13px;
 }
 
 #chatList::item:selected {
-    background-color: #1a1a1a;
-    color: #f0f0f0;
+    background-color: #161616;
+    color: #e8e8e8;
 }
 
 #chatList::item:hover:!selected {
-    background-color: #111111;
-    color: #bbbbbb;
+    background-color: #0f0f0f;
+    color: #a0a0a0;
 }
 
 #newChatBtn {
-    background-color: #141414;
-    color: #cccccc;
-    border: 1px solid #222222;
+    background-color: transparent;
+    color: #8a8a8a;
+    border: 1px solid #1e1e1e;
     font-size: 13px;
-    padding: 10px 14px;
-    margin: 8px;
-    border-radius: 8px;
+    padding: 9px 12px;
+    margin: 6px 8px 4px 8px;
+    border-radius: 6px;
     text-align: left;
 }
 
 #newChatBtn:hover {
-    background-color: #1e1e1e;
-    border-color: #303030;
-    color: #ffffff;
+    background-color: #111111;
+    border-color: #282828;
+    color: #d0d0d0;
 }
 
-/* Chat area */
+/* ── Chat area ── */
 #chatArea {
-    background-color: #0f0f0f;
+    background-color: #0d0d0d;
 }
 
 QTextBrowser {
-    background-color: #0f0f0f;
+    background-color: #0d0d0d;
     border: none;
-    color: #d0d0d0;
+    color: #d4d4d4;
     padding: 0;
-    selection-background-color: #2e2e2e;
+    selection-background-color: #2a2a2a;
 }
 
-/* Input area */
+/* ── Input area ── */
 #inputArea {
-    background-color: #0f0f0f;
-    border-top: 1px solid #181818;
+    background-color: #0d0d0d;
+    border-top: none;
+    padding-top: 0;
 }
 
 #messageInput {
-    background-color: #161616;
-    border: 1px solid #262626;
-    border-radius: 14px;
-    padding: 11px 16px;
-    color: #e8e8e8;
+    background-color: #141414;
+    border: 1px solid #212121;
+    border-radius: 12px;
+    padding: 12px 16px;
+    color: #ececec;
     font-size: 14px;
+    line-height: 1.5;
 }
 
 #messageInput:focus {
-    border-color: #383838;
-    background-color: #191919;
+    border-color: #303030;
+    background-color: #161616;
+    outline: none;
 }
 
-/* Buttons */
+/* ── Buttons ── */
 QPushButton {
-    background-color: #1a1a1a;
-    color: #bbbbbb;
-    border: 1px solid #252525;
-    border-radius: 8px;
-    padding: 8px 16px;
+    background-color: #141414;
+    color: #a0a0a0;
+    border: 1px solid #202020;
+    border-radius: 7px;
+    padding: 7px 14px;
     font-size: 13px;
 }
 
 QPushButton:hover {
-    background-color: #222222;
-    border-color: #333333;
-    color: #e0e0e0;
+    background-color: #1a1a1a;
+    border-color: #2c2c2c;
+    color: #d8d8d8;
 }
 
 QPushButton:pressed {
-    background-color: #2a2a2a;
+    background-color: #222222;
 }
 
 #sendBtn {
-    background-color: #f0f0f0;
-    color: #0a0a0a;
+    background-color: #efefef;
+    color: #080808;
     border: none;
     border-radius: 10px;
-    font-weight: 600;
-    font-size: 16px;
+    font-weight: 700;
+    font-size: 15px;
     padding: 0;
 }
 
@@ -141,180 +145,186 @@ QPushButton:pressed {
 }
 
 #sendBtn:pressed {
-    background-color: #d8d8d8;
+    background-color: #d4d4d4;
 }
 
 #attachBtn {
-    background-color: #141414;
-    color: #666666;
-    border: 1px solid #202020;
+    background-color: transparent;
+    color: #4a4a4a;
+    border: 1px solid #1e1e1e;
     border-radius: 10px;
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 300;
     padding: 0;
 }
 
 #attachBtn:hover {
-    background-color: #1e1e1e;
-    color: #aaaaaa;
-    border-color: #2e2e2e;
+    background-color: #141414;
+    color: #888888;
+    border-color: #2a2a2a;
 }
 
-/* Status */
+/* ── Status ── */
 #statusLabel {
-    color: #383838;
+    color: #3a3a3a;
     font-size: 11px;
     padding: 2px 4px;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
 }
 
-/* Scrollbar */
+/* ── Scrollbar ── */
 QScrollBar:vertical {
     background: transparent;
-    width: 5px;
-    margin: 4px 0;
+    width: 4px;
+    margin: 2px 0;
 }
 
 QScrollBar::handle:vertical {
-    background: #252525;
+    background: #202020;
     border-radius: 2px;
-    min-height: 20px;
+    min-height: 24px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background: #383838;
+    background: #303030;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QScrollBar:horizontal { height: 0; }
 
-/* Combo box */
+/* ── ComboBox ── */
 QComboBox {
-    background-color: #161616;
-    border: 1px solid #252525;
-    border-radius: 7px;
-    padding: 6px 12px;
-    color: #bbbbbb;
+    background-color: #111111;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #888888;
     min-width: 100px;
+    font-size: 12px;
 }
 
-QComboBox::drop-down { border: none; width: 20px; }
+QComboBox:hover {
+    border-color: #282828;
+    color: #aaaaaa;
+}
+
+QComboBox::drop-down { border: none; width: 18px; }
 
 QComboBox QAbstractItemView {
-    background-color: #161616;
-    border: 1px solid #252525;
-    color: #bbbbbb;
-    selection-background-color: #252525;
+    background-color: #111111;
+    border: 1px solid #1e1e1e;
+    color: #888888;
+    selection-background-color: #1e1e1e;
     outline: none;
 }
 
-/* Labels */
+/* ── Labels ── */
 QLabel {
-    color: #888888;
+    color: #6b6b6b;
     background: transparent;
 }
 
-/* Checkbox */
-QCheckBox { color: #888888; spacing: 8px; }
+/* ── Checkbox ── */
+QCheckBox { color: #777777; spacing: 8px; }
 QCheckBox::indicator {
-    width: 16px; height: 16px;
-    border: 1px solid #333333;
+    width: 15px; height: 15px;
+    border: 1px solid #2e2e2e;
     border-radius: 4px;
-    background: #161616;
+    background: #111111;
 }
 QCheckBox::indicator:checked {
     background: #e0e0e0;
     border-color: #e0e0e0;
 }
 
-/* Menu */
+/* ── Menu ── */
 QMenu {
-    background-color: #141414;
-    border: 1px solid #252525;
+    background-color: #111111;
+    border: 1px solid #222222;
     border-radius: 10px;
-    padding: 6px;
+    padding: 5px;
 }
-QMenu::item { padding: 8px 18px; border-radius: 6px; color: #bbbbbb; font-size: 13px; }
-QMenu::item:selected { background-color: #1e1e1e; color: #ffffff; }
+QMenu::item { padding: 8px 16px; border-radius: 5px; color: #a8a8a8; font-size: 13px; }
+QMenu::item:selected { background-color: #1a1a1a; color: #e8e8e8; }
 
-/* Splitter */
-QSplitter::handle { background: #181818; width: 1px; }
+/* ── Splitter ── */
+QSplitter::handle { background: #131313; width: 1px; }
 
-/* Line edit */
+/* ── LineEdit ── */
 QLineEdit {
-    background-color: #161616;
-    border: 1px solid #252525;
-    border-radius: 7px;
+    background-color: #111111;
+    border: 1px solid #1e1e1e;
+    border-radius: 6px;
     padding: 7px 12px;
     color: #d0d0d0;
 }
-QLineEdit:focus { border-color: #383838; }
+QLineEdit:focus { border-color: #303030; }
 
-/* Tab */
-QTabWidget::pane { border: 1px solid #1e1e1e; background: #0f0f0f; }
-QTabBar::tab { background: transparent; color: #555555; padding: 8px 20px; border-bottom: 2px solid transparent; font-size: 13px; }
+/* ── Tab ── */
+QTabWidget::pane { border: 1px solid #181818; background: #0d0d0d; }
+QTabBar::tab { background: transparent; color: #505050; padding: 8px 18px; border-bottom: 2px solid transparent; font-size: 13px; }
 QTabBar::tab:selected { color: #d0d0d0; border-bottom: 2px solid #d0d0d0; }
 QTabBar::tab:hover:!selected { color: #888888; }
 
-/* Chat top bar */
+/* ── Chat top bar ── */
 #chatTopBar {
-    background-color: #080808;
-    border-bottom: 1px solid #181818;
+    background-color: #0d0d0d;
+    border-bottom: 1px solid #141414;
 }
 
-/* Model selector combo */
+/* ── Model selector ── */
 #modelCombo {
-    background-color: #0e0e0e;
-    border: 1px solid #1e1e1e;
-    border-radius: 6px;
+    background-color: transparent;
+    border: 1px solid #1a1a1a;
+    border-radius: 5px;
     padding: 3px 8px;
-    color: #555555;
+    color: #484848;
     font-size: 12px;
     min-width: 180px;
 }
 #modelCombo:hover {
-    border-color: #2a2a2a;
-    color: #888888;
+    border-color: #252525;
+    color: #707070;
 }
-#modelCombo::drop-down { border: none; width: 18px; }
+#modelCombo::drop-down { border: none; width: 16px; }
 #modelCombo QAbstractItemView {
     background-color: #0e0e0e;
-    border: 1px solid #1e1e1e;
+    border: 1px solid #1a1a1a;
     color: #888888;
-    selection-background-color: #1a1a1a;
+    selection-background-color: #161616;
     outline: none;
     font-size: 12px;
 }
 
-/* Model refresh button */
+/* ── Model refresh button ── */
 #modelRefreshBtn {
     background-color: transparent;
-    border: 1px solid #1e1e1e;
-    border-radius: 6px;
-    color: #383838;
-    font-size: 14px;
+    border: 1px solid #1a1a1a;
+    border-radius: 5px;
+    color: #333333;
+    font-size: 13px;
     padding: 0;
 }
 #modelRefreshBtn:hover {
-    background-color: #141414;
-    border-color: #2a2a2a;
-    color: #666666;
+    background-color: #111111;
+    border-color: #242424;
+    color: #606060;
 }
 
-/* Export button */
+/* ── Export button ── */
 #exportBtn {
     background-color: transparent;
-    border: 1px solid #1e1e1e;
-    border-radius: 6px;
-    color: #383838;
+    border: 1px solid #1a1a1a;
+    border-radius: 5px;
+    color: #333333;
     font-size: 12px;
     padding: 4px 10px;
 }
 #exportBtn:hover {
-    background-color: #141414;
-    border-color: #2a2a2a;
-    color: #666666;
+    background-color: #111111;
+    border-color: #242424;
+    color: #606060;
 }
 """
 
@@ -324,53 +334,72 @@ MESSAGE_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-    font-family: "Inter", "Segoe UI", "SF Pro", "Helvetica Neue", sans-serif;
-    font-size: 14px;
-    color: #cccccc;
-    background: #0f0f0f;
-    padding: 16px 0 12px 0;
-    line-height: 1.7;
+    font-family: "Inter", "Segoe UI", "SF Pro Text", system-ui, sans-serif;
+    font-size: 14.5px;
+    color: #c8c8c8;
+    background: #0d0d0d;
+    padding: 24px 0 20px 0;
+    line-height: 1.75;
 }
 
+/* ── Message layout ── */
 .msg-wrap {
-    padding: 3px 24px;
+    padding: 2px 48px;
+    max-width: 100%;
 }
 
 .msg-wrap.user {
     display: flex;
     justify-content: flex-end;
-    padding: 4px 20px;
+    padding: 4px 32px;
 }
 
 .bubble-user {
-    background: #1c1c1c;
-    border: 1px solid #282828;
-    border-radius: 16px 16px 4px 16px;
-    padding: 10px 15px;
-    max-width: 74%;
-    color: #ececec;
-    font-size: 14px;
+    background: #1a1a1a;
+    border: 1px solid #242424;
+    border-radius: 18px 18px 4px 18px;
+    padding: 11px 16px;
+    max-width: 70%;
+    color: #e8e8e8;
+    font-size: 14.5px;
     word-wrap: break-word;
+    line-height: 1.65;
 }
 
 .msg-wrap.assistant {
-    padding: 4px 24px;
+    padding: 4px 48px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+/* Assistant avatar dot */
+.msg-wrap.assistant::before {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 50%;
+    background: #1c1c1c;
+    border: 1px solid #242424;
+    margin-top: 2px;
 }
 
 .bubble-assistant {
-    color: #c8c8c8;
-    font-size: 14px;
-    max-width: 90%;
+    color: #cccccc;
+    font-size: 14.5px;
+    max-width: calc(100% - 36px);
     word-wrap: break-word;
+    flex: 1;
 }
 
-/* ── Markdown elements inside assistant bubble ── */
-
+/* ── Markdown inside assistant ── */
 .bubble-assistant h1, .bubble-assistant h2, .bubble-assistant h3,
 .bubble-assistant h4, .bubble-assistant h5, .bubble-assistant h6 {
-    color: #e0e0e0;
+    color: #e4e4e4;
     font-weight: 600;
-    margin: 12px 0 4px 0;
+    margin: 16px 0 6px 0;
     line-height: 1.3;
 }
 .bubble-assistant h1 { font-size: 20px; }
@@ -379,145 +408,147 @@ body {
 .bubble-assistant h4, .bubble-assistant h5, .bubble-assistant h6 { font-size: 14px; }
 
 .bubble-assistant strong { color: #e8e8e8; font-weight: 600; }
-.bubble-assistant em { font-style: italic; color: #b8b8b8; }
+.bubble-assistant em { font-style: italic; color: #b0b0b0; }
 
 .bubble-assistant ul, .bubble-assistant ol {
-    padding-left: 22px;
+    padding-left: 20px;
     margin: 6px 0;
 }
 .bubble-assistant li {
-    margin: 3px 0;
+    margin: 4px 0;
     color: #c0c0c0;
 }
 
 .bubble-assistant a {
-    color: #5599dd;
+    color: #6ba3d6;
     text-decoration: none;
 }
 .bubble-assistant a:hover { text-decoration: underline; }
 
 .bubble-assistant hr {
     border: none;
-    border-top: 1px solid #252525;
-    margin: 10px 0;
+    border-top: 1px solid #202020;
+    margin: 12px 0;
 }
 
 .bubble-assistant .blockquote {
-    border-left: 3px solid #333;
-    padding: 4px 12px;
-    color: #888;
-    margin: 6px 0;
+    border-left: 3px solid #2a2a2a;
+    padding: 4px 14px;
+    color: #787878;
+    margin: 8px 0;
     font-style: italic;
 }
 
 .bubble-assistant code {
-    background: #181818;
-    border: 1px solid #242424;
-    padding: 1px 5px;
+    background: #161616;
+    border: 1px solid #222222;
+    padding: 2px 6px;
     border-radius: 4px;
-    font-family: "JetBrains Mono", "Consolas", monospace;
-    font-size: 12.5px;
-    color: #b0b0b0;
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-size: 13px;
+    color: #c0a870;
 }
 
 .code-block {
-    margin: 8px 0;
-    border-radius: 8px;
+    margin: 10px 0;
+    border-radius: 10px;
     overflow: hidden;
-    border: 1px solid #1e1e1e;
+    border: 1px solid #1c1c1c;
+    background: #0a0a0a;
 }
 .code-lang {
     display: block;
     background: #0e0e0e;
-    color: #444;
-    font-size: 10px;
-    padding: 4px 12px;
-    letter-spacing: 0.5px;
+    color: #3a3a3a;
+    font-size: 10.5px;
+    padding: 5px 14px;
+    letter-spacing: 0.6px;
     font-family: "JetBrains Mono", "Consolas", monospace;
     text-transform: uppercase;
-    border-bottom: 1px solid #1a1a1a;
+    border-bottom: 1px solid #161616;
 }
 .code-block pre {
-    background: #0b0b0b;
-    padding: 12px 14px;
+    background: #0a0a0a;
+    padding: 14px 16px;
     margin: 0;
-    border-radius: 0;
-    border: none;
 }
 .code-block pre code {
     background: none;
     border: none;
     padding: 0;
-    font-size: 12.5px;
-    color: #909090;
+    font-size: 13px;
+    color: #8a8a8a;
+    color: #9ca3af;
 }
 
 /* ── Error / tool ── */
-.msg-wrap.error { padding: 4px 24px; }
+.msg-wrap.error { padding: 4px 48px; }
 .bubble-error {
-    color: #ee5555;
-    border-left: 2px solid #cc3333;
+    color: #e05555;
+    border-left: 2px solid #c03333;
     padding-left: 12px;
-    font-size: 13px;
+    font-size: 13.5px;
     max-width: 88%;
+    line-height: 1.6;
 }
 
-.tool-wrap { padding: 2px 24px; }
+.tool-wrap { padding: 2px 48px 2px 84px; }
 .tool-header {
-    color: #333333;
+    color: #2e2e2e;
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 1.2px;
+    letter-spacing: 1.4px;
     font-family: "JetBrains Mono", "Consolas", monospace;
-    margin-bottom: 3px;
+    margin-bottom: 4px;
 }
 .tool-body {
-    background: #0b0b0b;
-    border: 1px solid #1c1c1c;
+    background: #090909;
+    border: 1px solid #181818;
     border-radius: 8px;
-    padding: 9px 13px;
+    padding: 10px 14px;
     font-family: "JetBrains Mono", "Consolas", monospace;
     font-size: 12px;
-    color: #484848;
+    color: #404040;
     white-space: pre-wrap;
     word-wrap: break-word;
-    max-width: 88%;
+    max-width: 92%;
+    line-height: 1.5;
 }
 
 /* ── Streaming cursor ── */
 .cursor {
     display: inline-block;
     width: 2px;
-    height: 14px;
-    background: #484848;
-    margin-left: 1px;
+    height: 15px;
+    background: #404040;
+    margin-left: 2px;
     vertical-align: text-bottom;
-    animation: blink 0.9s step-end infinite;
+    animation: blink 1s step-end infinite;
 }
 @keyframes blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
 }
 
-/* ── Generic code / pre (outside code-block) ── */
+/* ── Generic code / pre ── */
 code {
-    background: #181818;
-    border: 1px solid #222222;
-    padding: 1px 5px;
+    background: #161616;
+    border: 1px solid #202020;
+    padding: 2px 6px;
     border-radius: 4px;
     font-family: "JetBrains Mono", "Consolas", monospace;
     font-size: 13px;
-    color: #b0b0b0;
+    color: #c0a870;
 }
 pre {
-    background: #0b0b0b;
-    border: 1px solid #1c1c1c;
-    padding: 12px 14px;
-    border-radius: 8px;
+    background: #0a0a0a;
+    border: 1px solid #181818;
+    padding: 14px 16px;
+    border-radius: 9px;
     font-size: 13px;
     font-family: "JetBrains Mono", "Consolas", monospace;
-    color: #888888;
-    margin: 6px 0;
+    color: #7a7a7a;
+    margin: 8px 0;
     white-space: pre-wrap;
     word-wrap: break-word;
 }
@@ -525,27 +556,27 @@ pre code { background: none; border: none; padding: 0; }
 </style>
 """
 
-# Appended: file chip + file card CSS for MESSAGE_CSS
+# File chip + file card CSS appended to MESSAGE_CSS
 _EXTRA = """
 .attach-chip {
-    background: #1a1a1a;
-    border: 1px solid #2a2a2a;
+    background: #141414;
+    border: 1px solid #202020;
     border-radius: 8px;
     margin-bottom: 6px;
 }
 .attach-chip .ac-icon {
-    padding: 7px 8px 7px 10px;
+    padding: 8px 8px 8px 10px;
     font-size: 15px;
 }
 .attach-chip .ac-name {
-    padding: 7px 6px;
-    color: #cccccc;
+    padding: 8px 6px;
+    color: #c0c0c0;
     font-size: 13px;
     font-weight: 500;
 }
 .attach-chip .ac-ext {
-    padding: 7px 10px 7px 4px;
-    color: #555555;
+    padding: 8px 10px 8px 4px;
+    color: #484848;
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -557,13 +588,13 @@ _EXTRA = """
 }
 
 .fc-wrap {
-    padding: 4px 24px;
+    padding: 4px 32px 4px 84px;
 }
 .file-card {
-    background: #111111;
-    border: 1px solid #1e1e1e;
+    background: #0e0e0e;
+    border: 1px solid #1c1c1c;
     border-radius: 10px;
-    max-width: 380px;
+    max-width: 360px;
 }
 .file-card .fc-icon-cell {
     padding: 12px 10px 12px 14px;
@@ -580,7 +611,7 @@ _EXTRA = """
     font-weight: 500;
 }
 .file-card .fc-meta {
-    color: #444444;
+    color: #383838;
     font-size: 11px;
     margin-top: 2px;
     text-transform: uppercase;
@@ -591,12 +622,11 @@ _EXTRA = """
     vertical-align: middle;
 }
 .fc-link {
-    color: #5599dd;
+    color: #5a8fc0;
     font-size: 12px;
     text-decoration: none;
     white-space: nowrap;
 }
 """
 
-# Inject into MESSAGE_CSS
 MESSAGE_CSS = MESSAGE_CSS.replace("</style>", _EXTRA + "\n</style>")

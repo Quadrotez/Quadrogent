@@ -87,10 +87,10 @@ class MainWindow(QMainWindow):
         sb.setContentsMargins(0, 8, 0, 8)
         sb.setSpacing(4)
 
-        logo = QLabel("  ◈ Quadrogent")
+        logo = QLabel("  Quadrogent")
         logo.setStyleSheet(
-            "font-size: 17px; font-weight: 600; color: #e0e0e0; "
-            "padding: 10px 16px 14px 16px;"
+            "font-size: 15px; font-weight: 600; color: #505050; "
+            "padding: 14px 16px 12px 16px; letter-spacing: 0.5px;"
         )
         sb.addWidget(logo)
 

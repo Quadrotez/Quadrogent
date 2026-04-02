@@ -1,6 +1,7 @@
 import docker
 import os
 import threading
+import time
 
 
 CONTAINER_NAME = "quadrogent-sandbox"
@@ -24,7 +25,8 @@ class DockerManager:
         self.client: docker.DockerClient | None = None
         self.container = None
         self._lock = threading.Lock()
-        self._initialized = False   # True once init packages are confirmed installed
+        self._apt_lock = threading.Lock()   # serialise ALL apt calls
+        self._initialized = False
 
     def connect(self) -> bool:
         try:
@@ -45,7 +47,7 @@ class DockerManager:
                 self.container = self.client.containers.get(CONTAINER_NAME)
                 if self.container.status != "running":
                     self.container.start()
-                    self._initialized = False   # restarted — re-verify tools
+                    self._initialized = False
             except docker.errors.NotFound:
                 uploads_abs = os.path.abspath("uploads")
                 os.makedirs(uploads_abs, exist_ok=True)
@@ -54,8 +56,6 @@ class DockerManager:
                     name=CONTAINER_NAME,
                     command="sleep infinity",
                     detach=True,
-                    # "bridge" gives the container full internet access via
-                    # the host's default NAT bridge (same as `docker run` default)
                     network_mode="bridge",
                     volumes={
                         uploads_abs: {"bind": "/workspace/uploads", "mode": "rw"}
@@ -66,7 +66,7 @@ class DockerManager:
                     stdin_open=True,
                 )
                 self._initialized = False
-            except Exception as e:
+            except Exception:
                 return False
 
             if not self._initialized:
@@ -74,39 +74,53 @@ class DockerManager:
 
         return True
 
+    def _wait_apt_free(self, timeout: int = 120) -> None:
+        """Wait until dpkg/apt locks are released."""
+        deadline = time.monotonic() + timeout
+        check = (
+            "while fuser /var/lib/dpkg/lock-frontend "
+            "/var/lib/apt/lists/lock >/dev/null 2>&1; do sleep 2; done"
+        )
+        self._exec(check, timeout=timeout, extra_env=APT_ENV)
+
+    def _apt(self, cmd: str, timeout: int = 300) -> tuple[int, str]:
+        """Run an apt-get command with global lock + lock-file wait + retry."""
+        with self._apt_lock:
+            self._wait_apt_free(timeout=60)
+            code, out = self._exec(cmd, timeout=timeout, extra_env=APT_ENV)
+            if code != 0:
+                time.sleep(5)
+                self._wait_apt_free(timeout=30)
+                code, out = self._exec(cmd, timeout=timeout, extra_env=APT_ENV)
+        return code, out
+
     def _bootstrap(self):
-        """Install essential tools. Blocks until done — called inside _lock."""
-        # Step 1: update package lists (retry once on failure)
-        code, out = self._exec(
-            "apt-get update -qq 2>&1",
-            timeout=180,
-            extra_env=APT_ENV,
+        """Install essential tools. Called inside _lock."""
+        self._apt("apt-get update -qq 2>&1", timeout=180)
+        self._apt(
+            f"apt-get install -y --no-install-recommends --fix-missing {INIT_PACKAGES} 2>&1",
+            timeout=300,
         )
-        if code != 0:
-            # Retry — sometimes mirrors are flaky
-            code, out = self._exec(
-                "apt-get update -qq 2>&1",
-                timeout=180,
-                extra_env=APT_ENV,
-            )
-
-        # Step 2: install packages
-        install_cmd = (
-            f"apt-get install -y --no-install-recommends {INIT_PACKAGES} 2>&1"
-        )
-        self._exec(install_cmd, timeout=300, extra_env=APT_ENV)
-
-        # Step 3: create workspace dirs
         self._exec("mkdir -p /workspace/uploads /workspace/tmp")
-
         self._initialized = True
 
     def execute(self, command: str, timeout: int = 120) -> tuple[int, str]:
         if not self.container:
             if not self.ensure_container():
                 return -1, "Docker container is not available"
-        # Always pass APT env so agent's own apt calls are non-interactive too
         return self._exec(command, timeout, extra_env=APT_ENV)
+
+    def execute_apt(self, packages: str, timeout: int = 300) -> tuple[int, str]:
+        """Install apt packages safely (serialised, waits for lock, retries)."""
+        if not self.container:
+            if not self.ensure_container():
+                return -1, "Docker container is not available"
+        _, upd = self._apt("apt-get update -qq 2>&1", timeout=120)
+        code, out = self._apt(
+            f"apt-get install -y --no-install-recommends --fix-missing {packages} 2>&1",
+            timeout=timeout,
+        )
+        return code, (upd + "\n" + out).strip() if upd.strip() else out
 
     def _exec(
         self,
@@ -125,12 +139,10 @@ class DockerManager:
             stdout = (result.output[0] or b"").decode("utf-8", errors="replace")
             stderr = (result.output[1] or b"").decode("utf-8", errors="replace")
 
-            # Merge stdout + stderr so agent always sees the full output
             output = stdout
             if stderr.strip():
                 output = (output + "\n[stderr]\n" + stderr).strip() if output.strip() else stderr
 
-            # Trim very long output
             if len(output) > 20_000:
                 output = output[:10_000] + "\n...[truncated]...\n" + output[-5_000:]
 
