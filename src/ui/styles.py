@@ -553,6 +553,30 @@ pre {
     word-wrap: break-word;
 }
 pre code { background: none; border: none; padding: 0; }
+
+/* ── Math (LaTeX rendered) ── */
+.math-block {
+    display: block;
+    background: #0e0e0e;
+    border: 1px solid #1c1c1c;
+    border-radius: 6px;
+    padding: 10px 16px;
+    margin: 8px 0;
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 13.5px;
+    color: #b8a060;
+    text-align: center;
+    overflow-x: auto;
+}
+.math-inline {
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 13px;
+    color: #b8a060;
+    background: #111111;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
 </style>
 """
 

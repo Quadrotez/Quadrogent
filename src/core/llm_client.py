@@ -164,6 +164,17 @@ class LLMClient:
         self.base_url = base_url
         self.model: str | None = None  # None = let LM Studio pick the loaded model
         self.session = requests.Session()
+        self._active_response = None   # current streaming response — for abort()
+
+    def abort(self):
+        """Close the active streaming response to unblock iter_lines()."""
+        r = self._active_response
+        if r is not None:
+            try:
+                r.close()
+            except Exception:
+                pass
+            self._active_response = None
 
     def check_connection(self) -> bool:
         try:
@@ -234,39 +245,46 @@ class LLMClient:
         )
         r.raise_for_status()
         r.encoding = "utf-8"  # Force UTF-8 — prevents Cyrillic/emoji mojibake
+        self._active_response = r
 
         # Assemble tool-call fragments: index -> {id, name, arguments}
         tc_asm: dict[int, dict] = {}
 
-        for line in r.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data: "):
-                continue
-            data_str = line[6:]
-            if data_str.strip() == "[DONE]":
-                break
-            try:
-                chunk = json.loads(data_str)
-                choice = chunk["choices"][0]
-                delta = choice.get("delta", {})
+        try:
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    choice = chunk["choices"][0]
+                    delta = choice.get("delta", {})
 
-                # ── Content delta ──────────────────────────────
-                text = delta.get("content") or ""
-                if text:
-                    yield {"type": "delta", "content": text}
+                    # ── Content delta ──────────────────────────────
+                    text = delta.get("content") or ""
+                    if text:
+                        yield {"type": "delta", "content": text}
 
-                # ── Tool-call fragments ────────────────────────
-                for tc in delta.get("tool_calls", []):
-                    idx = tc.get("index", 0)
-                    if idx not in tc_asm:
-                        tc_asm[idx] = {"id": "", "name": "", "arguments": ""}
-                    if tc.get("id"):
-                        tc_asm[idx]["id"] = tc["id"]
-                    func = tc.get("function", {})
-                    tc_asm[idx]["name"]      += func.get("name", "")      or ""
-                    tc_asm[idx]["arguments"] += func.get("arguments", "") or ""
+                    # ── Tool-call fragments ────────────────────────
+                    for tc in delta.get("tool_calls", []):
+                        idx = tc.get("index", 0)
+                        if idx not in tc_asm:
+                            tc_asm[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc.get("id"):
+                            tc_asm[idx]["id"] = tc["id"]
+                        func = tc.get("function", {})
+                        tc_asm[idx]["name"]      += func.get("name", "")      or ""
+                        tc_asm[idx]["arguments"] += func.get("arguments", "") or ""
 
-            except (json.JSONDecodeError, KeyError, IndexError):
-                continue
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+        except Exception:
+            # Socket closed by abort() or network error — exit cleanly
+            pass
+
+        self._active_response = None
 
         # Yield assembled tool calls (if any)
         if tc_asm:

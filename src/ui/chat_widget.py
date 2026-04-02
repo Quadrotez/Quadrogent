@@ -16,6 +16,96 @@ from PyQt5.QtGui import QDesktopServices, QKeyEvent
 from src.ui.styles import MESSAGE_CSS
 
 
+
+# ── LaTeX → HTML (basic, QTextBrowser-safe) ──────────────────────────────────
+
+def _latex_to_html(expr: str) -> str:
+    """Convert a simple LaTeX math expression to readable HTML."""
+    import re as _re
+
+    GREEK = {
+        r'\alpha': 'α', r'\beta': 'β', r'\gamma': 'γ', r'\delta': 'δ',
+        r'\epsilon': 'ε', r'\zeta': 'ζ', r'\eta': 'η', r'\theta': 'θ',
+        r'\lambda': 'λ', r'\mu': 'μ', r'\nu': 'ν', r'\xi': 'ξ',
+        r'\pi': 'π', r'\rho': 'ρ', r'\sigma': 'σ', r'\tau': 'τ',
+        r'\phi': 'φ', r'\chi': 'χ', r'\psi': 'ψ', r'\omega': 'ω',
+        r'\Gamma': 'Γ', r'\Delta': 'Δ', r'\Theta': 'Θ', r'\Lambda': 'Λ',
+        r'\Pi': 'Π', r'\Sigma': 'Σ', r'\Phi': 'Φ', r'\Psi': 'Ψ', r'\Omega': 'Ω',
+    }
+    SYMBOLS = {
+        r'\times': '×', r'\cdot': '·', r'\div': '÷',
+        r'\pm': '±', r'\mp': '∓',
+        r'\leq': '≤', r'\geq': '≥', r'\neq': '≠',
+        r'\approx': '≈', r'\equiv': '≡', r'\sim': '∼',
+        r'\infty': '∞', r'\partial': '∂', r'\nabla': '∇',
+        r'\in': '∈', r'\notin': '∉', r'\subset': '⊂', r'\supset': '⊃',
+        r'\cup': '∪', r'\cap': '∩', r'\emptyset': '∅',
+        r'\forall': '∀', r'\exists': '∃',
+        r'\rightarrow': '→', r'\leftarrow': '←', r'\Rightarrow': '⇒',
+        r'\Leftrightarrow': '⟺', r'\to': '→',
+        r'\ldots': '…', r'\cdots': '⋯',
+    }
+
+    s = expr.strip()
+
+    # \frac{num}{den}
+    def _frac(m):
+        num = _latex_to_html(m.group(1))
+        den = _latex_to_html(m.group(2))
+        return f'<sup>{num}</sup>&#8260;<sub>{den}</sub>'
+    s = _re.sub(r'\\frac\{([^{}]*)\}\{([^{}]*)\}', _frac, s)
+
+    # \sqrt{x}
+    s = _re.sub(r'\\sqrt\{([^{}]*)\}', lambda m: f'√({_latex_to_html(m.group(1))})', s)
+
+    # x^{n}
+    s = _re.sub(r'\^\{([^{}]*)\}', lambda m: f'<sup>{_latex_to_html(m.group(1))}</sup>', s)
+    s = _re.sub(r'\^([A-Za-z0-9])', lambda m: f'<sup>{m.group(1)}</sup>', s)
+
+    # x_{n}
+    s = _re.sub(r'_\{([^{}]*)\}', lambda m: f'<sub>{_latex_to_html(m.group(1))}</sub>', s)
+    s = _re.sub(r'_([A-Za-z0-9])', lambda m: f'<sub>{m.group(1)}</sub>', s)
+
+    # \text{...}
+    s = _re.sub(r'\\text\{([^{}]*)\}', r'\1', s)
+
+    # \left( \right)
+    s = _re.sub(r'\\left\s*[\(\[\{|]', '(', s)
+    s = _re.sub(r'\\right\s*[\)\]\}|]', ')', s)
+
+    # Greek + symbols
+    for tex, uni in {**GREEK, **SYMBOLS}.items():
+        s = s.replace(tex, uni)
+
+    # Remaining backslash commands
+    s = _re.sub(r'\\([A-Za-z]+)', r'\1', s)
+
+    # Curly braces
+    s = s.replace('{', '').replace('}', '')
+
+    return s
+def _render_latex(text: str) -> str:
+    """Replace LaTeX \\[...\\] and \\(...\\) blocks with rendered HTML."""
+    import re as _re
+
+    def _block(m):
+        rendered = _latex_to_html(m.group(1))
+        return f'<div class="math-block">{rendered}</div>'
+
+    def _inline(m):
+        rendered = _latex_to_html(m.group(1))
+        return f'<span class="math-inline">{rendered}</span>'
+
+    # \[ ... \]  display math
+    text = _re.sub(r'\\\[(.+?)\\\]', _block, text, flags=_re.DOTALL)
+    # \( ... \)  inline math
+    text = _re.sub(r'\\\((.+?)\\\)', _inline, text, flags=_re.DOTALL)
+    # $$ ... $$  display math
+    text = _re.sub(r'\$\$(.+?)\$\$', _block, text, flags=_re.DOTALL)
+    # $ ... $    inline math (not $$)
+    text = _re.sub(r'(?<!\$)\$([^\$\n]+?)\$(?!\$)', _inline, text)
+    return text
+
 # ── Markdown → HTML (lightweight, QTextBrowser-safe) ─────────────────────────
 
 def _md_to_html(text: str) -> str:
@@ -25,6 +115,8 @@ def _md_to_html(text: str) -> str:
         label = f'<span class="code-lang">{lang}</span>' if lang else ""
         return f'<div class="code-block">{label}<pre><code>{code}</code></pre></div>'
 
+    # Pre-process LaTeX blocks before escaping
+    text = _render_latex(text)
     text = re.sub(r"```(\w*)\n(.*?)```", _fence, text, flags=re.DOTALL)
 
     parts = re.split(r'(<div class="code-block">.*?</div>)', text, flags=re.DOTALL)

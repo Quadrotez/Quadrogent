@@ -129,27 +129,38 @@ class MainWindow(QMainWindow):
     # ── Docker init ───────────────────────────────────────
 
     def _init_docker_async(self):
-        """Start container bootstrap in a background thread; show progress in status bar."""
+        """Bootstrap Docker container in background; block send until ready."""
         import threading
+        from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
+
+        # Disable send while sandbox is not ready
+        self.chat.send_btn.setEnabled(False)
+        self.chat.status_label.setText("🐳 Подготовка контейнера…")
+
+        def _set_status(msg):
+            QMetaObject.invokeMethod(
+                self.chat.status_label, "setText",
+                _Qt.QueuedConnection, Q_ARG(str, msg),
+            )
+
+        def _set_send_enabled(val: bool):
+            QMetaObject.invokeMethod(
+                self.chat.send_btn, "setEnabled",
+                _Qt.QueuedConnection, Q_ARG(bool, val),
+            )
 
         def _run():
-            from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
-            def _set_status(msg):
-                QMetaObject.invokeMethod(
-                    self.chat.status_label, "setText",
-                    _Qt.QueuedConnection, Q_ARG(str, msg)
-                )
-
-            _set_status("🐳 Подготовка Docker-контейнера…")
+            _set_status("🐳 Подготовка контейнера…")
             ok = self.agent.docker.ensure_container()
             if ok:
-                _set_status("🐳 Контейнер готов")
-                QTimer.singleShot(3000, lambda: self.chat.status_label.setText(""))
+                _set_status("✓ Контейнер готов")
+                _set_send_enabled(True)
+                QTimer.singleShot(2500, lambda: self.chat.status_label.setText(""))
             else:
-                _set_status("⚠ Docker недоступен — выполнение команд невозможно")
+                _set_status("⚠ Docker недоступен — команды не работают")
+                _set_send_enabled(True)  # still allow Talk mode
 
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+        threading.Thread(target=_run, daemon=True).start()
 
     # ── Chat list ─────────────────────────────────────────
 
@@ -299,12 +310,17 @@ class MainWindow(QMainWindow):
 
     def _on_file_ready(self, filename: str, abs_path: str):
         self.chat.add_file_card(filename, abs_path)
-        if self.current_chat_id:
-            self.db.add_message(
-                self.current_chat_id,
-                "file_card",
-                json.dumps({"filename": filename, "abs_path": abs_path}),
-            )
+        chat_id = self.current_chat_id
+        if chat_id is not None:
+            try:
+                self.db.add_message(
+                    chat_id,
+                    "file_card",
+                    json.dumps({"filename": filename, "abs_path": abs_path}),
+                )
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
 
     def _on_attach(self, filepath: str):
         if not self.current_chat_id:
@@ -531,9 +547,15 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(200, self._refresh_models)
 
     def closeEvent(self, event):
-        if self.worker:
+        # Stop the agent immediately — abort LLM stream so the thread exits fast
+        if self.worker and self.worker.isRunning():
             self.agent.stop()
-            self.worker.wait(3000)
-        self.agent.docker.stop()
+            # Give the worker up to 2 s to finish cleanly; if not, terminate it
+            if not self.worker.wait(2000):
+                self.worker.terminate()
+                self.worker.wait(1000)
+        # Stop Docker container in a daemon thread so the window closes instantly
+        import threading
+        threading.Thread(target=self.agent.docker.stop, daemon=True).start()
         self.db.close()
         event.accept()

@@ -2,6 +2,7 @@ import sqlite3
 import json
 import os
 import shutil
+import threading
 import time
 from datetime import datetime
 
@@ -12,13 +13,37 @@ DB_PATH = "quadrogent.db"
 class Database:
     def __init__(self, path: str = DB_PATH):
         self.path = path
+        self._lock = threading.Lock()
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # Serialise writes at the DB level — SQLite WAL still needs a mutex
+        # when multiple Python threads share the same connection object
         self._create_tables()
 
+    # ── Internal helpers ──────────────────────────────────
+
+    def _execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        with self._lock:
+            return self.conn.execute(sql, params)
+
+    def _executescript(self, script: str):
+        with self._lock:
+            cur = self.conn.cursor()
+            cur.executescript(script)
+            return cur
+
+    def _commit(self):
+        with self._lock:
+            self.conn.commit()
+
+    def _execute_commit(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self.conn.execute(sql, params)
+            self.conn.commit()
+            return cur
+
     def _create_tables(self):
-        cur = self.conn.cursor()
-        cur.executescript("""
+        self._executescript("""
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -59,42 +84,39 @@ class Database:
                 FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
             );
         """)
-        self.conn.commit()
 
     # ── Settings ──────────────────────────────────────────
 
     def get_setting(self, key: str, default: str = "") -> str:
-        row = self.conn.execute(
+        row = self._execute(
             "SELECT value FROM settings WHERE key = ?", (key,)
         ).fetchone()
         return row["value"] if row else default
 
     def set_setting(self, key: str, value: str):
-        self.conn.execute(
+        self._execute_commit(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
             (key, value),
         )
-        self.conn.commit()
 
     # ── Chats ─────────────────────────────────────────────
 
     def create_chat(self, title: str = "Новый чат", mode: str = "auto") -> int:
         now = datetime.now().isoformat()
-        cur = self.conn.execute(
+        cur = self._execute_commit(
             "INSERT INTO chats (title, mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
             (title, mode, now, now),
         )
-        self.conn.commit()
         return cur.lastrowid
 
     def get_chats(self) -> list[dict]:
-        rows = self.conn.execute(
+        rows = self._execute(
             "SELECT * FROM chats ORDER BY updated_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
 
     def get_chat(self, chat_id: int) -> dict | None:
-        row = self.conn.execute(
+        row = self._execute(
             "SELECT * FROM chats WHERE id = ?", (chat_id,)
         ).fetchone()
         return dict(row) if row else None
@@ -107,34 +129,36 @@ class Database:
         fields["updated_at"] = datetime.now().isoformat()
         sets = ", ".join(f"{k} = ?" for k in fields)
         vals = list(fields.values()) + [chat_id]
-        self.conn.execute(f"UPDATE chats SET {sets} WHERE id = ?", vals)
-        self.conn.commit()
+        self._execute_commit(f"UPDATE chats SET {sets} WHERE id = ?", vals)
 
     def delete_chat(self, chat_id: int):
-        self.conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
-        self.conn.commit()
+        self._execute_commit("DELETE FROM chats WHERE id = ?", (chat_id,))
 
     def touch_chat(self, chat_id: int):
+        # Called inside add_message which already holds the lock via _execute_commit,
+        # so we use the raw connection here — protected by _lock in add_message.
         self.conn.execute(
             "UPDATE chats SET updated_at = ? WHERE id = ?",
             (datetime.now().isoformat(), chat_id),
         )
-        self.conn.commit()
 
     # ── Messages ──────────────────────────────────────────
 
-    def add_message(self, chat_id: int, role: str, content: str, tool: str | None = None) -> int:
+    def add_message(
+        self, chat_id: int, role: str, content: str, tool: str | None = None
+    ) -> int:
         now = datetime.now().isoformat()
-        cur = self.conn.execute(
-            "INSERT INTO messages (chat_id, role, content, tool, ts) VALUES (?, ?, ?, ?, ?)",
-            (chat_id, role, content, tool, now),
-        )
-        self.touch_chat(chat_id)
-        self.conn.commit()
-        return cur.lastrowid
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO messages (chat_id, role, content, tool, ts) VALUES (?, ?, ?, ?, ?)",
+                (chat_id, role, content, tool, now),
+            )
+            self.touch_chat(chat_id)
+            self.conn.commit()
+            return cur.lastrowid
 
     def get_messages(self, chat_id: int) -> list[dict]:
-        rows = self.conn.execute(
+        rows = self._execute(
             "SELECT * FROM messages WHERE chat_id = ? ORDER BY id", (chat_id,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -146,15 +170,14 @@ class Database:
         cache_name = f"{int(time.time())}_{filename}"
         cache_path = os.path.join(".cache", cache_name)
         shutil.copy2(filepath, cache_path)
-        self.conn.execute(
+        self._execute_commit(
             "INSERT INTO attachments (msg_id, filename, cache_path) VALUES (?, ?, ?)",
             (msg_id, filename, cache_path),
         )
-        self.conn.commit()
         return cache_path
 
     def get_attachments(self, msg_id: int) -> list[dict]:
-        rows = self.conn.execute(
+        rows = self._execute(
             "SELECT * FROM attachments WHERE msg_id = ?", (msg_id,)
         ).fetchall()
         return [dict(r) for r in rows]
@@ -163,14 +186,13 @@ class Database:
 
     def save_memory(self, chat_id: int, summary: str):
         now = datetime.now().isoformat()
-        self.conn.execute(
+        self._execute_commit(
             "INSERT INTO memories (chat_id, summary, created_at) VALUES (?, ?, ?)",
             (chat_id, summary, now),
         )
-        self.conn.commit()
 
     def get_all_memories(self) -> list[dict]:
-        rows = self.conn.execute(
+        rows = self._execute(
             "SELECT * FROM memories ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -183,4 +205,5 @@ class Database:
         return "Воспоминания из прошлых диалогов:\n" + "\n".join(parts)
 
     def close(self):
-        self.conn.close()
+        with self._lock:
+            self.conn.close()
