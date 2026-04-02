@@ -1,5 +1,25 @@
+"""
+agent.py — Quadrogent core agent.
+
+Key fixes for weak local models (7B):
+ 1. SYSTEM PROMPTS: Short, imperative, with explicit tool-call examples.
+    Weak models get confused by long instructions — they start narrating instead of acting.
+
+ 2. tool_choice "required" in work mode: forces the model to ALWAYS call a tool.
+    With "auto", weak models often choose to write text instead of calling tools.
+
+ 3. Anti-narration detection: if the model responds with a plan/text and NO tool calls
+    in work mode, we inject a hard re-prompt: "DO NOT WRITE TEXT. CALL A TOOL NOW."
+
+ 4. Step-by-step forcing: after each tool result, the next turn reminds the model
+    to continue executing (not summarize).
+
+ 5. "ready" detection at tool-call level: model calls deliver_file or a sentinel
+    instead of writing "ready" in text (which gets ignored by some models).
+"""
 import json
 import os
+import re
 import shutil
 from typing import Callable
 
@@ -10,86 +30,96 @@ from src.utils.file_manager import FileManager
 from src.db.database import Database
 
 
-SYSTEM_WORK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
-Режим: Work. Ты выполняешь задачи автономно.
+# ─────────────────────────────────────────────────────────────────────────────
+#  System prompts — SHORT and IMPERATIVE for weak models
+# ─────────────────────────────────────────────────────────────────────────────
 
-Среда Docker: Ubuntu 22.04. Уже установлено: python3, pip3, zip, unzip, curl, wget, git, jq.
-НЕ нужно проверять наличие python3/pip3/zip/unzip — они ВСЕГДА есть. Используй их напрямую.
+SYSTEM_WORK = """\
+You are Quadrogent, an autonomous AI agent. Respond in the same language as the user.
 
-Правила:
-1. Составь чёткий план действий и сообщи его пользователю.
-2. Выполняй план шаг за шагом, используя доступные инструменты.
-3. Не останавливайся, пока задача не будет выполнена.
-4. Никогда не говори "я не могу" — всегда используй инструменты.
-5. Если команда завершилась с ошибкой — ОБЯЗАТЕЛЬНО прочитай вывод, найди причину и исправь.
-   - Нужна библиотека Python? → install_packages("название", "pip").
-   - Нужен системный пакет? → install_packages("название", "apt").
-   - НИКОГДА не вызывай apt-get или pip вручную через execute_command — используй install_packages.
-   - exit code != 0? → прочитай stderr, исправь, попробуй снова.
-   - НИКОГДА не сдавайся после одной ошибки.
-6. Когда задача полностью выполнена, напиши "ready" на отдельной строке.
+ENVIRONMENT: Docker Ubuntu 22.04. Pre-installed: python3, pip3, zip, unzip, curl, git.
+Working dir: /workspace. User files: /workspace/uploads/.
 
-Установка пакетов — ТОЛЬКО через install_packages (не через execute_command):
-  install_packages("ffmpeg imagemagick", "apt")
-  install_packages("pandas numpy", "pip")
+RULES — READ CAREFULLY:
+- NEVER write a plan and stop. ALWAYS immediately call a tool after any explanation.
+- NEVER say "you can run..." or "next step is..." — DO IT YOURSELF with a tool.
+- After EVERY tool result, call the NEXT tool. Keep going until task is done.
+- When fully done: call deliver_file (if there's a file) then write "TASK_COMPLETE".
+- If a command fails: read the error, fix it, retry. Never give up.
+- Packages: use install_packages tool only. Never run apt-get/pip via execute_command.
 
-Доступные инструменты:
-- execute_command: выполнить команду Linux в Docker (root, интернет есть).
-  Рабочая директория /workspace, папка uploads доступна как /workspace/uploads.
-  НЕ используй для apt-get/pip — это сломает лок. Только install_packages.
-- install_packages: ЕДИНСТВЕННЫЙ правильный способ установить пакеты. apt или pip.
-- web_search: поиск в интернете
-- read_file: прочитать текстовый файл из uploads/ по имени
-- write_file: записать ТЕКСТОВЫЙ файл в uploads/ — пользователь получит кнопку скачать.
-  НЕ ИСПОЛЬЗОВАТЬ для бинарных файлов (zip, png, exe и т.д.)!
-- deliver_file: показать пользователю файл, уже созданный в /workspace/uploads/.
-  Используй вместо write_file для бинарных файлов.
-  Workflow: execute_command создаёт файл → deliver_file(имя_файла).
-- delete_file: удалить файл или папку из uploads/ (путь "." очищает всё)
-- list_files: список файлов в uploads/
+TOOL CALL EXAMPLES:
+  execute_command({"command": "mkdir -p /workspace/myapp && cd /workspace/myapp && django-admin startproject portfolio ."})
+  install_packages({"packages": "django pillow", "manager": "pip"})
+  execute_command({"command": "cat > /workspace/myapp/main/views.py << 'EOF'\\nfrom django.shortcuts import render\\nEOF"})
+  deliver_file({"path": "portfolio.zip"})
+
+START: Call a tool immediately. Do not write only text.
 """
 
-SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
-Режим: Talk. Ты ведёшь обычный диалог с пользователем.
-Отвечай по существу, кратко и понятно. Используй markdown для форматирования.
+SYSTEM_TALK = """\
+You are Quadrogent, an open-source AI agent. Respond in the same language as the user.
+Mode: Talk. Have a normal conversation. Use markdown for formatting.
 """
 
-SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
-Режим: Auto. Определи сам, нужно ли использовать инструменты для этого запроса.
+SYSTEM_AUTO = """\
+You are Quadrogent, an autonomous AI agent. Respond in the same language as the user.
 
-Среда Docker: Ubuntu 22.04. Уже установлено: python3, pip3, zip, unzip, curl, wget, git, jq.
-НЕ нужно проверять наличие python3/pip3/zip/unzip — они ВСЕГДА есть.
+ENVIRONMENT: Docker Ubuntu 22.04. Pre-installed: python3, pip3, zip, unzip, curl, git.
+Working dir: /workspace. User files: /workspace/uploads/.
 
-Если задача требует действий (код, файлы, поиск, команды) — работай автономно:
-1. Составь план, сообщи пользователю.
-2. Выполняй, используя инструменты.
-3. Если ошибка — прочитай вывод, исправь, попробуй снова. Никогда не сдавайся.
-4. Когда готово — напиши "ready".
+If the task requires actions (code, files, commands): work autonomously.
+- Call tools immediately. Do not just describe steps — execute them.
+- After each tool result, call the next tool. Keep going until done.
+- When done: call deliver_file if there's a file, then write "TASK_COMPLETE".
+- If error: read output, fix, retry.
+- Packages: install_packages tool only.
 
-Если это обычный вопрос — просто ответь. Используй markdown.
-
-Установка пакетов — ТОЛЬКО через install_packages (никогда не apt-get/pip в execute_command):
-  install_packages("ffmpeg", "apt"), install_packages("requests", "pip")
-
-Доступные инструменты:
-- execute_command: команда Linux в Docker (root, интернет). /workspace, uploads → /workspace/uploads.
-  НЕ используй для apt-get/pip — только install_packages.
-- install_packages: ЕДИНСТВЕННЫЙ способ поставить пакеты. apt или pip.
-- web_search: поиск в интернете
-- read_file: прочитать текстовый файл из uploads/
-- write_file: записать ТЕКСТОВЫЙ файл в uploads/. НЕ для бинарных файлов!
-- deliver_file: отдать пользователю бинарный файл из /workspace/uploads/.
-  Workflow: execute_command создаёт файл → deliver_file(имя).
-- delete_file: удалить из uploads/ (".") очищает всё)
-- list_files: список файлов в uploads/
+If it's a simple question: just answer. Use markdown.
 """
 
-MEMORY_SUMMARIZE_PROMPT = """Проанализируй этот диалог и напиши краткое резюме (1-3 предложения) — что было обсуждено и к каким выводам пришли. Только суть, без лишних слов."""
+MEMORY_SUMMARIZE_PROMPT = (
+    "Summarize this conversation in 1-3 sentences. "
+    "What was discussed and what conclusions were reached? Be brief."
+)
+
+# Patterns that indicate the model is narrating instead of acting
+_NARRATION_PATTERNS = [
+    r"шаг\s*\d+",          # "Шаг 1:", "Шаг 2:"
+    r"step\s*\d+",          # "Step 1:"
+    r"сначала\s+(нужно|надо|установим|создадим)",
+    r"для начала",
+    r"план\s*:",
+    r"давайте\s+(начнём|создадим|установим|сделаем)",
+    r"теперь\s+(нужно|надо|создадим|запустим)",
+    r"следующий шаг",
+    r"next step",
+    r"выполним следующие шаги",
+    r"разделим на",
+    r"вот\s+что\s+(нужно|надо|мы)",
+    r"можно\s+(запустить|выполнить|сделать)",
+    r"you can run",
+    r"you should run",
+    r"run the following",
+]
+_NARRATION_RE = re.compile("|".join(_NARRATION_PATTERNS), re.IGNORECASE)
+
+# Injected message when model narrates without acting
+_FORCE_ACTION_MSG = (
+    "[SYSTEM: You wrote text but called NO tools. "
+    "This is WRONG. You MUST call a tool RIGHT NOW. "
+    "Do not write any more text — call execute_command or install_packages immediately. "
+    "Start executing, not explaining.]"
+)
+
+# After a tool result, remind the model to continue
+_CONTINUE_MSG = (
+    "[SYSTEM: Tool executed. Now call the NEXT tool to continue the task. "
+    "Keep working until the task is fully complete. Do NOT stop or summarize yet.]"
+)
 
 
 class Agent:
-    """Core agent that orchestrates LLM, tools, and modes."""
-
     def __init__(self, db: Database):
         self.db = db
         self.llm = LLMClient()
@@ -101,13 +131,12 @@ class Agent:
         self.on_stream_start: Callable[[], None]               | None = None
         self.on_stream_delta: Callable[[str], None]            | None = None
         self.on_stream_end:   Callable[[], None]               | None = None
-        # (filename, abs_path) — emitted when write_file succeeds
         self.on_file_ready:   Callable[[str, str], None]       | None = None
         self._stop = False
 
     def stop(self):
         self._stop = True
-        self.llm.abort()   # unblock any active iter_lines() call immediately
+        self.llm.abort()
 
     # ── Callbacks ─────────────────────────────────────────
 
@@ -127,7 +156,7 @@ class Agent:
             mode, SYSTEM_AUTO
         )
         if memories:
-            base += f"\n\n{memories}"
+            base += f"\n\nLong-term memory:\n{memories}"
         return base
 
     # ── Tool execution ────────────────────────────────────
@@ -135,22 +164,16 @@ class Agent:
     def _execute_tool(self, name: str, arguments: dict) -> str:
         if name == "execute_command":
             cmd = arguments.get("command", "")
-            # Intercept raw apt-get calls — route them through the safe apt handler
-            # so lock conflicts and retries are handled properly
-            import re as _re
-            _apt_pat = _re.compile(
-                r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", _re.MULTILINE
-            )
+            # Intercept raw apt-get — route through safe handler
+            _apt_pat = re.compile(r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", re.MULTILINE)
             if _apt_pat.search(cmd):
-                # Extract package names from simple "apt-get install [-flags] pkg1 pkg2" patterns
-                pkg_match = _re.search(
+                pkg_match = re.search(
                     r"apt(?:-get)?\s+install\s+(?:-[^\s]+\s+)*(.+?)(?:\s*&&|\s*\||\s*2>&1|$)",
-                    cmd, _re.DOTALL,
+                    cmd, re.DOTALL,
                 )
                 if pkg_match:
-                    pkgs = pkg_match.group(1).strip().split()
-                    # Filter out flags (start with -)
-                    pkgs = [p for p in pkgs if not p.startswith("-") and p != "2>&1"]
+                    pkgs = [p for p in pkg_match.group(1).strip().split()
+                            if not p.startswith("-") and p != "2>&1"]
                     if pkgs:
                         exit_code, output = self.docker.execute_apt(" ".join(pkgs))
                         result = f"[install_packages intercepted apt-get | exit code: {exit_code}]\n{output}"
@@ -183,12 +206,10 @@ class Agent:
             content = arguments.get("content", "")
             try:
                 abs_path = self.files.write(path, content)
-                bytes_written = len(content.encode('utf-8'))
-                result_msg = f"File written: {path}\nLocation: {abs_path}\nSize: {bytes_written} bytes"
                 self._emit_tool(name, path, f"Written → {abs_path}")
                 if self.on_file_ready:
                     self.on_file_ready(path, abs_path)
-                return result_msg
+                return f"File written: {path} ({len(content.encode())} bytes)"
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
                 return f"Error writing file: {e}"
@@ -197,17 +218,13 @@ class Agent:
             path = arguments.get("path", "").strip()
             try:
                 if path in (".", "", "/"):
-                    # Clear all contents of uploads dir
                     base = os.path.abspath(self.files.base_dir)
                     deleted = []
                     for entry in os.listdir(base):
-                        entry_path = os.path.join(base, entry)
-                        if os.path.isdir(entry_path):
-                            shutil.rmtree(entry_path)
-                        else:
-                            os.remove(entry_path)
+                        ep = os.path.join(base, entry)
+                        shutil.rmtree(ep) if os.path.isdir(ep) else os.remove(ep)
                         deleted.append(entry)
-                    result = f"Cleared uploads/: deleted {len(deleted)} item(s): {', '.join(deleted)}" if deleted else "uploads/ was already empty"
+                    result = f"Cleared {len(deleted)} items" if deleted else "Already empty"
                 else:
                     self.files.delete(path)
                     result = f"Deleted: {path}"
@@ -215,20 +232,20 @@ class Agent:
                 return result
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
-                return f"Error deleting file: {e}"
+                return f"Error: {e}"
 
         elif name == "list_files":
             try:
                 files = self.files.list_files()
-                if files:
-                    result = f"Files in uploads/ ({len(files)} total):\n" + "\n".join(f"  {f}" for f in files)
-                else:
-                    result = "uploads/ is empty (0 files)"
+                result = (
+                    f"Files ({len(files)}):\n" + "\n".join(f"  {f}" for f in files)
+                    if files else "uploads/ is empty"
+                )
                 self._emit_tool(name, "", result)
                 return result
             except Exception as e:
                 self._emit_tool(name, "", f"Error: {e}")
-                return f"Error listing files: {e}"
+                return f"Error: {e}"
 
         elif name == "install_packages":
             packages = arguments.get("packages", "").strip()
@@ -236,10 +253,10 @@ class Agent:
             if not packages:
                 return "Error: no packages specified"
             if manager == "pip":
-                cmd = f"pip3 install --quiet {packages} 2>&1"
-                exit_code, output = self.docker.execute(cmd)
+                exit_code, output = self.docker.execute(
+                    f"pip3 install --quiet {packages} 2>&1"
+                )
             else:
-                # Use the safe apt handler: handles lock wait, update, retry
                 exit_code, output = self.docker.execute_apt(packages)
             status = "OK" if exit_code == 0 else f"exit code {exit_code}"
             result = f"[{status}]\n{output}" if output else f"[{status}]"
@@ -251,29 +268,46 @@ class Agent:
             try:
                 abs_path = self.files._safe_path(path)
                 if not os.path.exists(abs_path):
-                    result = f"Error: file '{path}' not found in uploads/"
+                    result = f"Error: '{path}' not found in uploads/"
                     self._emit_tool(name, path, result)
                     return result
-                self._emit_tool(name, path, f"Delivered to user: {abs_path}")
+                self._emit_tool(name, path, f"Delivered: {abs_path}")
                 if self.on_file_ready:
                     self.on_file_ready(path, abs_path)
-                return f"File delivered: {abs_path}"
+                return f"File delivered: {path}"
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
                 return f"Error: {e}"
 
         return f"Unknown tool: {name}"
 
+    # ── Helpers ───────────────────────────────────────────
+
+    def _is_narrating(self, text: str, tool_calls) -> bool:
+        """Return True if model wrote a plan/text but called no tools in work mode."""
+        if tool_calls:
+            return False
+        return bool(text.strip()) and bool(_NARRATION_RE.search(text))
+
+    def _is_done(self, text: str, tool_calls) -> bool:
+        """Return True if task is complete."""
+        if not text:
+            return False
+        t = text.strip().lower()
+        # Must have delivered a file or explicitly signalled done
+        return "task_complete" in t or (
+            "ready" in t.split() and not tool_calls
+        )
+
     # ── Main agent loop ───────────────────────────────────
 
     def run(self, chat_id: int, user_message: str, mode: str = "auto"):
-        """Run the agent loop for a user message."""
         self._stop = False
-
         self.db.add_message(chat_id, "user", user_message)
 
         system = self._get_system_prompt(mode)
         db_messages = self.db.get_messages(chat_id)
+
         messages = [{"role": "system", "content": system}]
         for m in db_messages:
             if m["role"] in ("user", "assistant"):
@@ -282,9 +316,17 @@ class Agent:
                 messages.append({"role": "user", "content": m["content"]})
 
         use_tools = mode in ("work", "auto")
-        max_iterations = 25
 
-        for _ in range(max_iterations):
+        # In work mode: force tool calls — don't let model choose to skip
+        # "required" forces the model to always call at least one tool per turn.
+        # We'll relax this to "auto" once the model signals completion.
+        tool_choice = "required" if mode == "work" else "auto"
+
+        max_iterations = 40
+        consecutive_narrations = 0
+        tools_called_total = 0
+
+        for iteration in range(max_iterations):
             if self._stop:
                 break
 
@@ -295,7 +337,12 @@ class Agent:
                 full_content = ""
                 tool_calls = None
 
-                for item in self.llm.chat(messages, use_tools=use_tools, stream=True):
+                for item in self.llm.chat(
+                    messages,
+                    use_tools=use_tools,
+                    stream=True,
+                    tool_choice=tool_choice,
+                ):
                     if self._stop:
                         break
                     if item.get("type") == "delta":
@@ -310,17 +357,29 @@ class Agent:
                 if self.on_stream_end:
                     self.on_stream_end()
 
+                # Save assistant text if any
                 if full_content.strip():
                     self.db.add_message(chat_id, "assistant", full_content)
                     messages.append({"role": "assistant", "content": full_content})
 
-                # No tools or talk mode → done
+                # ── Talk mode / no tools ──────────────────────────
                 if not use_tools or not tool_calls:
-                    break
-                if "ready" in full_content.lower().split():
+                    # Check for narration without action in work mode
+                    if use_tools and mode == "work" and self._is_narrating(full_content, tool_calls):
+                        consecutive_narrations += 1
+                        if consecutive_narrations >= 2:
+                            # Hard stop — model is stuck narrating
+                            break
+                        # Inject hard re-prompt
+                        messages.append({"role": "user", "content": _FORCE_ACTION_MSG})
+                        self.db.add_message(chat_id, "tool", _FORCE_ACTION_MSG)
+                        continue
                     break
 
-                # Process tool calls
+                consecutive_narrations = 0
+
+                # ── Process tool calls ────────────────────────────
+                task_done = False
                 for tc in tool_calls:
                     if self._stop:
                         break
@@ -330,10 +389,31 @@ class Agent:
                         args = json.loads(func.get("arguments", "{}"))
                     except json.JSONDecodeError:
                         args = {}
+
                     result = self._execute_tool(name, args)
+                    tools_called_total += 1
+
+                    # deliver_file signals the end of a file-delivery task
+                    if name == "deliver_file" and "Error" not in result:
+                        task_done = True
+
                     tool_msg = f"[Tool: {name}]\n{result}"
                     messages.append({"role": "user", "content": tool_msg})
                     self.db.add_message(chat_id, "tool", tool_msg, tool=name)
+
+                if task_done or self._is_done(full_content, tool_calls):
+                    break
+
+                # After tool calls: switch tool_choice back to "auto"
+                # so model can choose to write a final message if done
+                # But keep "required" until at least some tools have run
+                if tools_called_total >= 2:
+                    tool_choice = "auto"
+
+                # Inject continue reminder after each tool batch
+                # This prevents the model from stopping to summarize mid-task
+                if not task_done and tools_called_total < 30:
+                    messages.append({"role": "user", "content": _CONTINUE_MSG})
 
             except Exception as e:
                 if self.on_stream_end:
@@ -347,16 +427,13 @@ class Agent:
         db_messages = self.db.get_messages(chat_id)
         if not db_messages:
             return ""
-
         conversation = "\n".join(
             f"{m['role']}: {m['content'][:500]}" for m in db_messages[:30]
         )
-
         messages = [
             {"role": "system", "content": MEMORY_SUMMARIZE_PROMPT},
             {"role": "user", "content": conversation},
         ]
-
         try:
             response = self.llm.chat(messages, use_tools=False, stream=False)
             summary = response.get("content", "").strip()

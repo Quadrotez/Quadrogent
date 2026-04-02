@@ -1,3 +1,9 @@
+"""
+llm_client.py — LM Studio OpenAI-compatible API client.
+
+Key change: chat() now accepts tool_choice parameter
+so the agent can pass "required" to force tool calls in work mode.
+"""
 import json
 import requests
 from typing import Generator
@@ -11,15 +17,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "execute_command",
-            "description": "Execute a Linux command inside the Docker sandbox with root privileges and internet access. "
-                           "Working directory is /workspace. The uploads folder is mounted at /workspace/uploads. "
-                           "Use for running scripts, compiling code, installing packages, complex file operations, etc.",
+            "description": (
+                "Execute a shell command in Docker (Ubuntu 22.04, root, internet). "
+                "Working dir: /workspace. Uploads: /workspace/uploads/. "
+                "IMPORTANT: Do NOT use for apt-get or pip — use install_packages instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The shell command to execute"
+                        "description": "Shell command to run. Can be multi-line with &&, heredoc, etc."
                     }
                 },
                 "required": ["command"]
@@ -29,31 +37,45 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "web_search",
-            "description": "Search the web for information. Returns top results with titles, URLs and snippets.",
+            "name": "install_packages",
+            "description": (
+                "Install packages inside Docker. "
+                "Use manager='pip' for Python packages, manager='apt' for system packages. "
+                "This is the ONLY correct way to install packages — never use apt-get or pip in execute_command."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "packages": {
                         "type": "string",
-                        "description": "The search query"
+                        "description": "Space-separated package names, e.g. 'django pillow' or 'ffmpeg imagemagick'"
+                    },
+                    "manager": {
+                        "type": "string",
+                        "enum": ["apt", "pip"],
+                        "description": "Use 'pip' for Python packages, 'apt' for system packages. Default: apt"
                     }
                 },
-                "required": ["query"]
+                "required": ["packages"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "read_file",
-            "description": "Read the contents of a file from the uploads directory.",
+            "name": "deliver_file",
+            "description": (
+                "Deliver a file to the user as a download. "
+                "The file must already exist in /workspace/uploads/. "
+                "Use this as the FINAL step after creating a zip/binary file. "
+                "Example: create zip via execute_command → then call deliver_file."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File name only (e.g. 'report.pdf'), relative to the uploads directory"
+                        "description": "Filename only (e.g. 'portfolio.zip'), must exist in uploads/"
                     }
                 },
                 "required": ["path"]
@@ -64,17 +86,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write content to a file in the uploads directory and deliver it to the user as a download.",
+            "description": (
+                "Write a text file to uploads/ and deliver it to the user. "
+                "Use ONLY for text files (py, js, html, txt, json, etc). "
+                "For binary files (zip, png, exe) use execute_command to create them, then deliver_file."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File name only (e.g. '123.py'), relative to the uploads directory"
+                        "description": "Filename only (e.g. 'script.py')"
                     },
                     "content": {
                         "type": "string",
-                        "description": "Content to write"
+                        "description": "Full text content to write"
                     }
                 },
                 "required": ["path", "content"]
@@ -84,15 +110,14 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "delete_file",
-            "description": "Delete a file or folder from the uploads directory.",
+            "name": "read_file",
+            "description": "Read a text file from uploads/ directory.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File or folder name relative to uploads directory. "
-                                       "Use '.' or '' to clear all contents of uploads."
+                        "description": "Filename only (e.g. 'data.csv')"
                     }
                 },
                 "required": ["path"]
@@ -113,61 +138,48 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "install_packages",
-            "description": "Install one or more system packages (apt-get) or Python packages (pip) "
-                           "inside the Docker sandbox. Handles apt-get update automatically. "
-                           "Use this INSTEAD of running apt-get or pip manually via execute_command.",
+            "name": "delete_file",
+            "description": "Delete a file or folder from uploads/. Use '.' to clear everything.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "packages": {
+                    "path": {
                         "type": "string",
-                        "description": "Space-separated package names, e.g. 'zip imagemagick' or 'requests pandas'"
-                    },
-                    "manager": {
-                        "type": "string",
-                        "enum": ["apt", "pip"],
-                        "description": "Package manager to use: 'apt' for system packages, 'pip' for Python packages. Default: apt"
+                        "description": "Filename, folder name, or '.' to clear all"
                     }
                 },
-                "required": ["packages"]
+                "required": ["path"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "deliver_file",
-            "description": "Show a file that already exists in the uploads directory as a download card for the user. "
-                           "Use this INSTEAD of write_file when you created a binary file (zip, image, PDF, etc.) "
-                           "via execute_command in /workspace/uploads/. "
-                           "Do NOT use write_file for binary files — it corrupts them.",
+            "name": "web_search",
+            "description": "Search the web. Returns titles, URLs and snippets.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
+                    "query": {
                         "type": "string",
-                        "description": "File name only (e.g. 'archive.zip'), must already exist in uploads/"
+                        "description": "Search query"
                     }
                 },
-                "required": ["path"]
+                "required": ["query"]
             }
         }
-    }
+    },
 ]
 
 
 class LLMClient:
-    """Client for LM Studio OpenAI-compatible API."""
-
     def __init__(self, base_url: str = LM_STUDIO_URL):
         self.base_url = base_url
-        self.model: str | None = None  # None = let LM Studio pick the loaded model
+        self.model: str | None = None
         self.session = requests.Session()
-        self._active_response = None   # current streaming response — for abort()
+        self._active_response = None
 
     def abort(self):
-        """Close the active streaming response to unblock iter_lines()."""
         r = self._active_response
         if r is not None:
             try:
@@ -196,7 +208,8 @@ class LLMClient:
         messages: list[dict],
         use_tools: bool = False,
         stream: bool = True,
-        temperature: float = 0.7,
+        temperature: float = 0.4,   # Lower temp = more predictable tool usage
+        tool_choice: str = "auto",  # "auto" | "required" | "none"
     ) -> dict | Generator:
         payload: dict = {
             "messages": messages,
@@ -207,7 +220,7 @@ class LLMClient:
             payload["model"] = self.model
         if use_tools:
             payload["tools"] = TOOLS
-            payload["tool_choice"] = "auto"
+            payload["tool_choice"] = tool_choice
 
         if stream:
             return self._stream(payload)
@@ -215,7 +228,6 @@ class LLMClient:
             return self._complete(payload)
 
     def _complete(self, payload: dict) -> dict:
-        """Non-streaming call, used for summarize_chat."""
         r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
@@ -232,11 +244,6 @@ class LLMClient:
         }
 
     def _stream(self, payload: dict) -> Generator:
-        """
-        Stream response. Yields dicts of two types:
-          {"type": "delta",      "content": str}          — text chunk
-          {"type": "tool_calls", "tool_calls": list[dict]} — assembled tool calls (end of stream)
-        """
         r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload,
@@ -244,10 +251,9 @@ class LLMClient:
             timeout=300,
         )
         r.raise_for_status()
-        r.encoding = "utf-8"  # Force UTF-8 — prevents Cyrillic/emoji mojibake
+        r.encoding = "utf-8"
         self._active_response = r
 
-        # Assemble tool-call fragments: index -> {id, name, arguments}
         tc_asm: dict[int, dict] = {}
 
         try:
@@ -262,12 +268,10 @@ class LLMClient:
                     choice = chunk["choices"][0]
                     delta = choice.get("delta", {})
 
-                    # ── Content delta ──────────────────────────────
                     text = delta.get("content") or ""
                     if text:
                         yield {"type": "delta", "content": text}
 
-                    # ── Tool-call fragments ────────────────────────
                     for tc in delta.get("tool_calls", []):
                         idx = tc.get("index", 0)
                         if idx not in tc_asm:
@@ -281,20 +285,20 @@ class LLMClient:
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
         except Exception:
-            # Socket closed by abort() or network error — exit cleanly
             pass
 
         self._active_response = None
 
-        # Yield assembled tool calls (if any)
         if tc_asm:
-            tool_calls = [
-                {
-                    "function": {
-                        "name":      tc_asm[i]["name"],
-                        "arguments": tc_asm[i]["arguments"],
+            yield {
+                "type": "tool_calls",
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name":      tc_asm[i]["name"],
+                            "arguments": tc_asm[i]["arguments"],
+                        }
                     }
-                }
-                for i in sorted(tc_asm.keys())
-            ]
-            yield {"type": "tool_calls", "tool_calls": tool_calls}
+                    for i in sorted(tc_asm.keys())
+                ],
+            }
