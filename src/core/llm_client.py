@@ -113,6 +113,30 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "install_packages",
+            "description": "Install one or more system packages (apt-get) or Python packages (pip) "
+                           "inside the Docker sandbox. Handles apt-get update automatically. "
+                           "Use this INSTEAD of running apt-get or pip manually via execute_command.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packages": {
+                        "type": "string",
+                        "description": "Space-separated package names, e.g. 'zip imagemagick' or 'requests pandas'"
+                    },
+                    "manager": {
+                        "type": "string",
+                        "enum": ["apt", "pip"],
+                        "description": "Package manager to use: 'apt' for system packages, 'pip' for Python packages. Default: apt"
+                    }
+                },
+                "required": ["packages"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "deliver_file",
             "description": "Show a file that already exists in the uploads directory as a download card for the user. "
                            "Use this INSTEAD of write_file when you created a binary file (zip, image, PDF, etc.) "

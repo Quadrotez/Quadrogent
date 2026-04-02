@@ -32,6 +32,8 @@ SYSTEM_WORK = """Ты — Quadrogent, ИИ-агент с открытым исх
 Доступные инструменты:
 - execute_command: выполнить команду Linux в Docker (root, интернет есть).
   Рабочая директория /workspace, папка uploads доступна как /workspace/uploads.
+- install_packages: установить пакет(ы) через apt или pip. Используй ВМЕСТО ручного apt-get/pip.
+  Примеры: install_packages("ffmpeg imagemagick", "apt"), install_packages("pandas numpy", "pip")
 - web_search: поиск в интернете
 - read_file: прочитать текстовый файл из uploads/ по имени (например "report.pdf")
 - write_file: записать ТЕКСТОВЫЙ файл в uploads/ — пользователь получит кнопку скачать.
@@ -63,6 +65,8 @@ SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исх
 Доступные инструменты:
 - execute_command: команда Linux в Docker (root, интернет).
   Рабочая директория /workspace, uploads → /workspace/uploads.
+- install_packages: установить пакет(ы) через apt или pip. Используй ВМЕСТО ручного apt-get/pip.
+  Примеры: install_packages("zip curl", "apt"), install_packages("requests", "pip")
 - web_search: поиск в интернете
 - read_file: прочитать текстовый файл из uploads/ по имени
 - write_file: записать ТЕКСТОВЫЙ файл в uploads/ — пользователь получит кнопку скачать.
@@ -196,6 +200,26 @@ class Agent:
             except Exception as e:
                 self._emit_tool(name, "", f"Error: {e}")
                 return f"Error listing files: {e}"
+
+        elif name == "install_packages":
+            packages = arguments.get("packages", "").strip()
+            manager  = arguments.get("manager", "apt").lower()
+            if not packages:
+                return "Error: no packages specified"
+            if manager == "pip":
+                cmd = f"pip3 install --quiet {packages} 2>&1"
+                exit_code, output = self.docker.execute(cmd)
+            else:
+                # apt: ensure update ran first, then install non-interactively
+                cmd = (
+                    f"apt-get update -qq 2>&1 && "
+                    f"apt-get install -y --no-install-recommends {packages} 2>&1"
+                )
+                exit_code, output = self.docker.execute(cmd)
+            status = "OK" if exit_code == 0 else f"exit code {exit_code}"
+            result = f"[{status}]\n{output}" if output else f"[{status}]"
+            self._emit_tool(name, f"{manager}: {packages}", result)
+            return result
 
         elif name == "deliver_file":
             path = arguments.get("path", "").strip()
