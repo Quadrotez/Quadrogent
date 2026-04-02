@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from typing import Callable
 
 from src.core.llm_client import LLMClient
@@ -12,40 +13,40 @@ from src.db.database import Database
 SYSTEM_WORK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
 Режим: Work. Ты выполняешь задачи автономно.
 
-Среда Docker: Ubuntu 22.04. Рабочая папка: /workspace. Файлы пользователя: /workspace/uploads.
-Уже установлено: python3, pip3, zip, unzip, curl, wget, git, jq. НЕ проверяй их наличие.
+Среда Docker: Ubuntu 22.04. Уже установлено: python3, pip3, zip, unzip, curl, wget, git, jq.
+НЕ нужно проверять наличие python3/pip3/zip/unzip — они ВСЕГДА есть. Используй их напрямую.
 
-═══ КРИТИЧЕСКИЕ ПРАВИЛА РАБОТЫ С ФАЙЛАМИ ═══
-1. write_file("script.py", код) → файл попадает в /workspace/uploads/script.py
-   Запускать его нужно: execute_command("python3 /workspace/uploads/script.py")
-   НЕ ДЕЛАЙ: execute_command("python3 script.py") — файл не найдётся!
+Правила:
+1. Составь чёткий план действий и сообщи его пользователю.
+2. Выполняй план шаг за шагом, используя доступные инструменты.
+3. Не останавливайся, пока задача не будет выполнена.
+4. Никогда не говори "я не могу" — всегда используй инструменты.
+5. Если команда завершилась с ошибкой — ОБЯЗАТЕЛЬНО прочитай вывод, найди причину и исправь.
+   - Нужна библиотека Python? → install_packages("название", "pip").
+   - Нужен системный пакет? → install_packages("название", "apt").
+   - НИКОГДА не вызывай apt-get или pip вручную через execute_command — используй install_packages.
+   - exit code != 0? → прочитай stderr, исправь, попробуй снова.
+   - НИКОГДА не сдавайся после одной ошибки.
+6. Когда задача полностью выполнена, напиши "ready" на отдельной строке.
 
-2. Если нужно создать много файлов и отдать пользователю zip:
-   a) execute_command: создай файлы в /workspace/tmp/
-   b) execute_command: cd /workspace/tmp && zip -r /workspace/uploads/result.zip .
-   c) deliver_file("result.zip")
+Установка пакетов — ТОЛЬКО через install_packages (не через execute_command):
+  install_packages("ffmpeg imagemagick", "apt")
+  install_packages("pandas numpy", "pip")
 
-3. Скрипт внутри execute_command должен писать файлы в /workspace/uploads/ или /workspace/tmp/
-   НЕ в /workspace/ напрямую — там они не будут видны как результат.
-
-4. После каждой команды СМОТРИ на exit code и вывод. exit code != 0 = ошибка, исправь.
-   НИКОГДА не пиши "команда успешно завершена" не глядя на вывод.
-
-5. Если list_files показывает не те файлы — значит скрипт писал не туда. Исправь путь.
-
-═══ ПРАВИЛА ПОВЕДЕНИЯ ═══
-- Никогда не сдавайся. Если что-то не работает — найди причину и исправь.
-- Не пиши план без выполнения. Сразу делай.
-- Когда задача выполнена — напиши "ready" на отдельной строке.
-- Установка пакетов — ТОЛЬКО через install_packages, никогда не apt-get/pip в execute_command.
-
-Инструменты:
-- execute_command(cmd): Linux в Docker. Всегда используй полные пути /workspace/uploads/file.
-- install_packages(pkgs, "apt"|"pip"): установка пакетов.
-- write_file(path, content): записать текстовый файл в uploads/. НЕ для бинарных!
-- deliver_file(filename): отдать бинарный файл из /workspace/uploads/ пользователю.
-- read_file(path), list_files(), delete_file(path): работа с uploads/.
-- web_search(query): поиск в интернете.
+Доступные инструменты:
+- execute_command: выполнить команду Linux в Docker (root, интернет есть).
+  Рабочая директория /workspace, папка uploads доступна как /workspace/uploads.
+  НЕ используй для apt-get/pip — это сломает лок. Только install_packages.
+- install_packages: ЕДИНСТВЕННЫЙ правильный способ установить пакеты. apt или pip.
+- web_search: поиск в интернете
+- read_file: прочитать текстовый файл из uploads/ по имени
+- write_file: записать ТЕКСТОВЫЙ файл в uploads/ — пользователь получит кнопку скачать.
+  НЕ ИСПОЛЬЗОВАТЬ для бинарных файлов (zip, png, exe и т.д.)!
+- deliver_file: показать пользователю файл, уже созданный в /workspace/uploads/.
+  Используй вместо write_file для бинарных файлов.
+  Workflow: execute_command создаёт файл → deliver_file(имя_файла).
+- delete_file: удалить файл или папку из uploads/ (путь "." очищает всё)
+- list_files: список файлов в uploads/
 """
 
 SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
@@ -54,34 +55,33 @@ SYSTEM_TALK = """Ты — Quadrogent, ИИ-агент с открытым исх
 """
 
 SYSTEM_AUTO = """Ты — Quadrogent, ИИ-агент с открытым исходным кодом.
+Режим: Auto. Определи сам, нужно ли использовать инструменты для этого запроса.
 
-Среда Docker: Ubuntu 22.04. Рабочая папка: /workspace. Файлы пользователя: /workspace/uploads.
-Уже установлено: python3, pip3, zip, unzip, curl, wget, git, jq.
+Среда Docker: Ubuntu 22.04. Уже установлено: python3, pip3, zip, unzip, curl, wget, git, jq.
+НЕ нужно проверять наличие python3/pip3/zip/unzip — они ВСЕГДА есть.
 
-Если задача требует действий — работай автономно:
-1. Сразу делай, не описывай план без выполнения.
-2. СМОТРИ на вывод каждой команды. exit code != 0 = ошибка, исправь.
-3. Никогда не сдавайся. Нашёл ошибку — исправь и повтори.
+Если задача требует действий (код, файлы, поиск, команды) — работай автономно:
+1. Составь план, сообщи пользователю.
+2. Выполняй, используя инструменты.
+3. Если ошибка — прочитай вывод, исправь, попробуй снова. Никогда не сдавайся.
 4. Когда готово — напиши "ready".
 
-Если обычный вопрос — просто ответь.
+Если это обычный вопрос — просто ответь. Используй markdown.
 
-═══ КРИТИЧНО: ПУТИ К ФАЙЛАМ ═══
-write_file("script.py", код) → файл в /workspace/uploads/script.py
-Запуск: execute_command("python3 /workspace/uploads/script.py")  ← ПОЛНЫЙ ПУТЬ!
-НЕ: execute_command("python3 script.py")  ← НЕ НАЙДЁТ ФАЙЛ!
+Установка пакетов — ТОЛЬКО через install_packages (никогда не apt-get/pip в execute_command):
+  install_packages("ffmpeg", "apt"), install_packages("requests", "pip")
 
-Создать файлы + zip для пользователя:
-  execute_command("python3 -c \"...\" ")  # пишем файлы в /workspace/tmp/
-  execute_command("zip -r /workspace/uploads/result.zip /workspace/tmp/")
-  deliver_file("result.zip")
-
-Инструменты:
-- execute_command(cmd): Linux в Docker. Всегда полные пути.
-- install_packages(pkgs, "apt"|"pip"): пакеты. Никогда не apt-get в execute_command!
-- write_file(path, content): текстовый файл в uploads/. НЕ для бинарных!
-- deliver_file(filename): бинарный файл из uploads/ → пользователю.
-- read_file(path), list_files(), delete_file(path), web_search(query).
+Доступные инструменты:
+- execute_command: команда Linux в Docker (root, интернет). /workspace, uploads → /workspace/uploads.
+  НЕ используй для apt-get/pip — только install_packages.
+- install_packages: ЕДИНСТВЕННЫЙ способ поставить пакеты. apt или pip.
+- web_search: поиск в интернете
+- read_file: прочитать текстовый файл из uploads/
+- write_file: записать ТЕКСТОВЫЙ файл в uploads/. НЕ для бинарных файлов!
+- deliver_file: отдать пользователю бинарный файл из /workspace/uploads/.
+  Workflow: execute_command создаёт файл → deliver_file(имя).
+- delete_file: удалить из uploads/ (".") очищает всё)
+- list_files: список файлов в uploads/
 """
 
 MEMORY_SUMMARIZE_PROMPT = """Проанализируй этот диалог и напиши краткое резюме (1-3 предложения) — что было обсуждено и к каким выводам пришли. Только суть, без лишних слов."""
@@ -183,10 +183,12 @@ class Agent:
             content = arguments.get("content", "")
             try:
                 abs_path = self.files.write(path, content)
+                bytes_written = len(content.encode('utf-8'))
+                result_msg = f"File written: {path}\nLocation: {abs_path}\nSize: {bytes_written} bytes"
                 self._emit_tool(name, path, f"Written → {abs_path}")
                 if self.on_file_ready:
                     self.on_file_ready(path, abs_path)
-                return f"File written: {abs_path}"
+                return result_msg
             except Exception as e:
                 self._emit_tool(name, path, f"Error: {e}")
                 return f"Error writing file: {e}"
@@ -196,7 +198,6 @@ class Agent:
             try:
                 if path in (".", "", "/"):
                     # Clear all contents of uploads dir
-                    import os, shutil
                     base = os.path.abspath(self.files.base_dir)
                     deleted = []
                     for entry in os.listdir(base):
@@ -220,9 +221,9 @@ class Agent:
             try:
                 files = self.files.list_files()
                 if files:
-                    result = "Files in uploads/:\n" + "\n".join(f"  {f}" for f in files)
+                    result = f"Files in uploads/ ({len(files)} total):\n" + "\n".join(f"  {f}" for f in files)
                 else:
-                    result = "uploads/ is empty"
+                    result = "uploads/ is empty (0 files)"
                 self._emit_tool(name, "", result)
                 return result
             except Exception as e:
