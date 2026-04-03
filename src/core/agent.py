@@ -1,16 +1,24 @@
 """
 agent.py — Quadrogent core agent.
 
-FIXES in this version:
-  1. Model loops on errors: when execute_command fails, model re-issues similar
-     commands without reading the error. Fix: inject error context explicitly
-     and force the model to address it.
-  2. _NEXT_STEP was ignored: now includes the last tool result summary
-     so the model has concrete context for the next step.
-  3. tool_choice="required" throughout work mode (not relaxed mid-task).
-  4. Completion ONLY via deliver_file — no text-based exit.
-  5. <think> blocks stripped from stored messages to keep context clean.
-  6. Error counter: if same command fails 3 times, inject a hard diagnostic prompt.
+Root causes fixed in this version:
+  1. write_file in work mode causes files to land in uploads/ instead of /workspace/.
+     FIXED: write_file removed from WORK_TOOLS. Model must use execute_command+heredoc.
+
+  2. Silent "stop" — model finishes streaming with no text and no tool_calls.
+     LM Studio considers it done; agent loop exited. Task incomplete.
+     FIXED: stream now yields {"type":"finish","reason":...}. Agent detects
+     finish_reason="stop" + no tools + work mode → injects re-prompt and continues.
+
+  3. Error context: model repeats failing commands without fixing them.
+     FIXED: _make_next_step() injects exit code + stderr snippet after every tool call.
+
+  4. Context explosion from write_file content: large file contents bloat context,
+     confuse the model about what state the workspace is in.
+     FIXED: write_file excluded from work mode entirely.
+
+  5. Model loses track of workspace state mid-task.
+     FIXED: Periodic workspace snapshot injected every 8 tool calls.
 """
 import json
 import os
@@ -25,50 +33,65 @@ from src.utils.file_manager import FileManager
 from src.db.database import Database
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  System prompts
+# ─────────────────────────────────────────────────────────────────────────────
+
 SYSTEM_WORK = """\
 You are Quadrogent — an autonomous execution agent. Respond in the user's language.
 
-ENVIRONMENT: Docker Ubuntu 22.04. Root, internet available.
+ENVIRONMENT: Docker Ubuntu 22.04. Root access, internet available.
 Pre-installed: python3, pip3, zip, unzip, curl, wget, git, jq.
-Working dir: /workspace | User files: /workspace/uploads/
+Project workspace: /workspace/
+Deliver results here: /workspace/uploads/
 
-━━━ IRON RULES ━━━
-1. ALWAYS call a tool. Never respond with text only.
-2. Do NOT narrate or explain — just DO it with a tool call.
-3. After each tool result, immediately call the NEXT tool.
-4. Read the tool output carefully before deciding the next step.
-5. If a command fails (exit code != 0): read stderr, fix the exact error, retry.
-6. Never repeat a failing command unchanged — always fix it first.
-7. Never use apt-get/pip inside execute_command — use install_packages tool.
-8. FINISH by: zip result → copy to uploads/ → deliver_file. This is the only exit.
+━━━ MANDATORY RULES ━━━
+1. ALWAYS call a tool every turn. NEVER output text without a tool call.
+2. ALL project files go in /workspace/ — create them with execute_command + heredoc.
+3. The uploads/ dir is ONLY for final deliverables (zip files, etc).
+4. Do NOT use write_file — it does not exist in this mode. Use execute_command.
+5. After each tool result: read the output, then call the next tool immediately.
+6. If exit code != 0: fix the exact error shown in stderr and retry.
+7. Never repeat a failing command unchanged. Always fix it first.
+8. install_packages is the ONLY way to install packages — never apt-get/pip in execute_command.
+9. FINISH by zipping the project, copying to uploads/, then calling deliver_file.
 
-━━━ FILE CREATION ━━━
-Create files using heredoc in execute_command:
-  execute_command: |
-    cat > /workspace/project/views.py << 'HEREDOC'
-    from django.shortcuts import render
-    def home(request):
-        return render(request, 'home.html')
-    HEREDOC
+━━━ HOW TO CREATE FILES (heredoc) ━━━
+execute_command:
+  mkdir -p /workspace/myproject/app && cat > /workspace/myproject/app/views.py << 'EOF'
+  from django.shortcuts import render
 
-━━━ COMPLETION ━━━
-  execute_command: "cd /workspace && zip -r uploads/project.zip project/"
-  deliver_file: "project.zip"
+  def home(request):
+      return render(request, 'home.html', {})
+  EOF
+
+━━━ WRONG (DO NOT DO THIS) ━━━
+  ✗ write_file("portfolio/views.py", "...") — write_file does not exist here
+  ✗ execute_command("pip install django") — use install_packages instead
+  ✗ Creating files in /workspace/uploads/ — that's only for the final zip
+
+━━━ COMPLETION SEQUENCE ━━━
+  execute_command: cd /workspace && zip -r uploads/portfolio.zip portfolio/
+  deliver_file: portfolio.zip
 """
 
 SYSTEM_TALK = """\
 You are Quadrogent, an open-source AI agent. Respond in the user's language.
-Mode: Talk — have a normal conversation. Use markdown.
+Mode: Talk — have a normal conversation. Use markdown formatting.
 """
 
 SYSTEM_AUTO = """\
 You are Quadrogent — autonomous AI agent. Respond in the user's language.
-Working dir: /workspace | Uploads: /workspace/uploads/
+Workspace: /workspace/ | Deliver files via: /workspace/uploads/
 Pre-installed: python3, pip3, zip, unzip, curl, wget, git.
 
-For action tasks: call tools immediately, keep going until done, finish with deliver_file.
+For action tasks:
+  - Call tools immediately. Do NOT just describe steps.
+  - Create project files in /workspace/ using execute_command with heredoc.
+  - install_packages for installing packages (never apt-get/pip in execute_command).
+  - Finish with: zip → uploads/ → deliver_file.
+
 For questions: just answer with markdown.
-Never use apt-get/pip in execute_command — use install_packages.
 """
 
 MEMORY_SUMMARIZE_PROMPT = (
@@ -76,43 +99,48 @@ MEMORY_SUMMARIZE_PROMPT = (
 )
 
 _HARD_REFORCE = (
-    "ERROR: You output text without calling any tool. This is FORBIDDEN in work mode.\n"
-    "CALL A TOOL RIGHT NOW. Do not write any text."
+    "STOP. You output text without calling a tool. In work mode you MUST call a tool every turn.\n"
+    "Call execute_command or install_packages RIGHT NOW. Do not write any text."
 )
 
+# Injected when model does a silent stop (finish_reason=stop, no content, no tools)
+_SILENT_STOP_REFORCE = (
+    "The task is NOT complete. You stopped without calling a tool or writing anything.\n"
+    "You MUST call a tool RIGHT NOW to continue the task.\n"
+    "What is the next step? Execute it immediately with execute_command."
+)
+
+
 def _make_next_step(tool_name: str, exit_code, output_snippet: str) -> str:
-    """Build a context-aware continue prompt based on last tool result."""
+    """Context-aware continue prompt injected after each tool result."""
     if exit_code is not None and exit_code != 0:
         return (
-            f"[Tool '{tool_name}' FAILED with exit code {exit_code}]\n"
-            f"Error output: {output_snippet[:400]}\n"
-            "Fix this error and retry with execute_command. Do NOT move to the next step yet."
+            f"[Tool '{tool_name}' FAILED — exit code {exit_code}]\n"
+            f"Error: {output_snippet[:500]}\n"
+            "You MUST fix this error. Read the error carefully, then call execute_command "
+            "with the corrected command. Do NOT move to the next step until this is fixed."
         )
     return (
         f"[Tool '{tool_name}' succeeded]\n"
-        "Call the NEXT tool now. Keep working until deliver_file is called."
+        "Call the NEXT tool immediately. Keep working. "
+        "Do NOT stop until deliver_file has been called."
     )
 
 
 def _strip_think(text: str) -> str:
-    """Remove <think>...</think> blocks from model output."""
+    """Remove <think>...</think> blocks — don't store internal reasoning."""
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 def _extract_exit_code(result: str):
-    """Extract exit code integer from tool result string, or None."""
     m = re.search(r"\[exit code:\s*(-?\d+)\]", result)
     return int(m.group(1)) if m else None
 
 
-def _short_output(result: str, maxlen: int = 600) -> str:
-    """Get a trimmed version of tool output for context injection."""
-    # Remove the [exit code: N] prefix line
+def _short_output(result: str, maxlen: int = 800) -> str:
+    """Trim tool output — keep the tail (errors are at the end)."""
     clean = re.sub(r"^\[.*?\]\n?", "", result).strip()
-    if len(clean) > maxlen:
-        # Keep tail (errors are usually at the end)
-        return "..." + clean[-maxlen:]
-    return clean
+    return ("..." + clean[-maxlen:]) if len(clean) > maxlen else clean
 
 
 class Agent:
@@ -151,25 +179,44 @@ class Agent:
             base += f"\n\nLong-term memory:\n{memories}"
         return base
 
+    def _workspace_snapshot(self) -> str:
+        """Get current state of /workspace for context injection."""
+        exit_code, output = self.docker.execute(
+            "find /workspace -not -path '*/\\.*' -not -path '*/uploads/*' "
+            "| head -60 | sort 2>/dev/null || echo '(empty)'"
+        )
+        files_in_uploads, _ = self.docker.execute(
+            "ls /workspace/uploads/ 2>/dev/null || echo '(empty)'"
+        )
+        return (
+            f"[WORKSPACE STATE]\n"
+            f"/workspace files:\n{output.strip()}\n\n"
+            f"/workspace/uploads/ contents: {files_in_uploads.strip()}\n"
+            "Continue the task based on what is already created above."
+        )
+
+    # ── Tool execution ────────────────────────────────────────────────────────
+
     def _execute_tool(self, name: str, arguments: dict) -> str:
+
         if name == "execute_command":
             cmd = arguments.get("command", "")
-            _apt_pat = re.compile(r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", re.MULTILINE)
-            if _apt_pat.search(cmd):
-                pkg_match = re.search(
+            # Intercept raw apt-get → safe handler
+            if re.search(r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", cmd, re.MULTILINE):
+                m = re.search(
                     r"apt(?:-get)?\s+install\s+(?:-[^\s]+\s+)*(.+?)(?:\s*&&|\s*\||\s*2>&1|$)",
                     cmd, re.DOTALL,
                 )
-                if pkg_match:
-                    pkgs = [p for p in pkg_match.group(1).strip().split()
+                if m:
+                    pkgs = [p for p in m.group(1).strip().split()
                             if not p.startswith("-") and p != "2>&1"]
                     if pkgs:
-                        exit_code, output = self.docker.execute_apt(" ".join(pkgs))
-                        result = f"[install_packages intercepted | exit code: {exit_code}]\n{output}"
+                        ec, out = self.docker.execute_apt(" ".join(pkgs))
+                        result = f"[intercepted apt | exit code: {ec}]\n{out}"
                         self._emit_tool(name, cmd, result)
                         return result
-            exit_code, output = self.docker.execute(cmd)
-            result = f"[exit code: {exit_code}]\n{output}"
+            ec, out = self.docker.execute(cmd)
+            result = f"[exit code: {ec}]\n{out}"
             self._emit_tool(name, cmd, result)
             return result
 
@@ -191,8 +238,17 @@ class Agent:
                 return f"Error: {e}"
 
         elif name == "write_file":
-            path = arguments.get("path", "")
+            # In work mode this tool is not in the tool list, but model might
+            # hallucinate it. Intercept gracefully.
+            path = arguments.get("path", "").strip()
             content = arguments.get("content", "")
+            if not path:
+                result = (
+                    "Error: write_file is not available in work mode. "
+                    "Use execute_command with heredoc to create files in /workspace/."
+                )
+                self._emit_tool(name, path, result)
+                return result
             try:
                 abs_path = self.files.write(path, content)
                 self._emit_tool(name, path, f"Written → {abs_path}")
@@ -230,9 +286,8 @@ class Agent:
                           if files else "uploads/ is empty")
                 self._emit_tool(name, "", result)
                 return result
-            except Exception as e:
-                self._emit_tool(name, "", f"Error: {e}")
-                return f"Error: {e}"
+            except Exception:
+                return "uploads/ is empty"
 
         elif name == "install_packages":
             packages = arguments.get("packages", "").strip()
@@ -240,13 +295,11 @@ class Agent:
             if not packages:
                 return "Error: no packages specified"
             if manager == "pip":
-                exit_code, output = self.docker.execute(
-                    f"pip3 install --quiet {packages} 2>&1"
-                )
+                ec, out = self.docker.execute(f"pip3 install --quiet {packages} 2>&1")
             else:
-                exit_code, output = self.docker.execute_apt(packages)
-            status = "OK" if exit_code == 0 else f"exit code {exit_code}"
-            result = f"[{status}]\n{output}" if output else f"[{status}]"
+                ec, out = self.docker.execute_apt(packages)
+            status = "OK" if ec == 0 else f"exit code {ec}"
+            result = f"[{status}]\n{out}" if out else f"[{status}]"
             self._emit_tool(name, f"{manager}: {packages}", result)
             return result
 
@@ -268,6 +321,8 @@ class Agent:
 
         return f"Unknown tool: {name}"
 
+    # ── Main agent loop ───────────────────────────────────────────────────────
+
     def run(self, chat_id: int, user_message: str, mode: str = "auto"):
         self._stop = False
         self.db.add_message(chat_id, "user", user_message)
@@ -282,10 +337,14 @@ class Agent:
             elif m["role"] == "tool":
                 messages.append({"role": "user", "content": m["content"]})
 
-        use_tools = mode in ("work", "auto")
-        tool_choice = "required" if mode == "work" else "auto"
-        delivered = False
-        max_iterations = 50
+        use_tools  = mode in ("work", "auto")
+        work_mode  = mode == "work"
+        # "required" in work mode: model MUST call a tool every turn
+        tool_choice = "required" if work_mode else "auto"
+        delivered   = False
+        tool_call_count = 0
+        max_iterations  = 60
+        silent_stops    = 0  # consecutive turns with no content and no tools
 
         for iteration in range(max_iterations):
             if self._stop:
@@ -295,55 +354,73 @@ class Agent:
                 if self.on_stream_start:
                     self.on_stream_start()
 
-                raw_content = ""
-                tool_calls = None
+                raw_content  = ""
+                tool_calls   = None
+                finish_reason = "stop"
 
                 for item in self.llm.chat(
                     messages,
                     use_tools=use_tools,
                     stream=True,
                     tool_choice=tool_choice,
+                    work_mode=work_mode,
                 ):
                     if self._stop:
                         break
-                    if item.get("type") == "delta":
+                    t = item.get("type")
+                    if t == "delta":
                         text = item.get("content", "")
                         if text:
                             raw_content += text
                             if self.on_stream_delta:
                                 self.on_stream_delta(text)
-                    elif item.get("type") == "tool_calls":
+                    elif t == "tool_calls":
                         tool_calls = item["tool_calls"]
+                    elif t == "finish":
+                        finish_reason = item.get("reason", "stop")
 
                 if self.on_stream_end:
                     self.on_stream_end()
 
                 display_content = _strip_think(raw_content)
 
-                # After deliver_file: one wrap-up text turn then stop
+                # ── Post-delivery wrap-up ─────────────────────────────────────
                 if delivered:
                     if display_content.strip():
                         self.db.add_message(chat_id, "assistant", display_content)
                     break
 
-                # Text-only response in work mode → hard re-prompt
+                # ── Silent stop detection ─────────────────────────────────────
+                # Model emitted nothing and no tool calls. This happens when
+                # LM Studio considers the generation "complete" spuriously.
+                if not display_content.strip() and not tool_calls:
+                    silent_stops += 1
+                    if silent_stops >= 3:
+                        break  # genuinely stuck, give up
+                    msg = {"role": "user", "content": _SILENT_STOP_REFORCE}
+                    messages.append(msg)
+                    self.db.add_message(chat_id, "tool", _SILENT_STOP_REFORCE)
+                    continue
+                silent_stops = 0
+
+                # ── Text-only response in work mode ───────────────────────────
                 if use_tools and not tool_calls:
                     if display_content.strip():
                         self.db.add_message(chat_id, "assistant", display_content)
                         messages.append({"role": "assistant", "content": display_content})
-                    if mode == "work":
+                    if work_mode:
                         messages.append({"role": "user", "content": _HARD_REFORCE})
                         self.db.add_message(chat_id, "tool", _HARD_REFORCE)
                         continue
                     else:
                         break
 
-                # Save visible reasoning if any
+                # Save reasoning text
                 if display_content.strip():
                     self.db.add_message(chat_id, "assistant", display_content)
                     messages.append({"role": "assistant", "content": display_content})
 
-                # Process tool calls
+                # ── Execute tool calls ────────────────────────────────────────
                 for tc in tool_calls:
                     if self._stop:
                         break
@@ -355,24 +432,30 @@ class Agent:
                         args = {}
 
                     result = self._execute_tool(name, args)
+                    tool_call_count += 1
 
                     if name == "deliver_file" and result.startswith("DELIVERED:"):
                         delivered = True
-                        tool_choice = "auto"
+                        tool_choice = "auto"  # allow text-only wrap-up after delivery
 
                     tool_msg = f"[Tool: {name}]\n{result}"
                     messages.append({"role": "user", "content": tool_msg})
                     self.db.add_message(chat_id, "tool", tool_msg, tool=name)
 
-                    # Inject context-aware next-step prompt after each tool
                     if not delivered:
-                        exit_code = _extract_exit_code(result)
+                        # Inject context-aware next-step prompt after EVERY tool
+                        ec = _extract_exit_code(result)
                         snippet = _short_output(result)
-                        next_msg = _make_next_step(name, exit_code, snippet)
+                        next_msg = _make_next_step(name, ec, snippet)
                         messages.append({"role": "user", "content": next_msg})
 
+                        # Periodic workspace snapshot to keep model oriented
+                        if tool_call_count % 8 == 0:
+                            snapshot = self._workspace_snapshot()
+                            messages.append({"role": "user", "content": snapshot})
+
                 if delivered:
-                    continue  # one more iteration for wrap-up text
+                    continue  # one more turn for wrap-up
 
             except Exception as e:
                 if self.on_stream_end:
@@ -390,8 +473,8 @@ class Agent:
             f"{m['role']}: {m['content'][:500]}" for m in db_messages[:30]
         )
         messages = [
-            {"role": "system", "content": MEMORY_SUMMARIZE_PROMPT},
-            {"role": "user", "content": conversation},
+            {"role": "system",  "content": MEMORY_SUMMARIZE_PROMPT},
+            {"role": "user",    "content": conversation},
         ]
         try:
             response = self.llm.chat(messages, use_tools=False, stream=False)
