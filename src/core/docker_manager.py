@@ -8,7 +8,7 @@ from typing import Callable
 CONTAINER_NAME = "quadrogent-sandbox"
 IMAGE = "ubuntu:22.04"
 
-INIT_PACKAGES = "curl wget zip unzip git python3 python3-pip nano jq psmisc lsof"
+INIT_PACKAGES = "curl wget zip unzip git python3 python3-pip python3-venv nano jq psmisc lsof"
 
 APT_ENV = {
     "DEBIAN_FRONTEND": "noninteractive",
