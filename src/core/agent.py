@@ -187,7 +187,7 @@ class Agent:
             "find /workspace -not -path '*/\\.*' -not -path '*/uploads/*' "
             "| head -60 | sort 2>/dev/null || echo '(empty)'"
         )
-        files_in_uploads, _ = self.docker.execute(
+        _, files_in_uploads = self.docker.execute(
             "ls /workspace/uploads/ 2>/dev/null || echo '(empty)'"
         )
         return (
@@ -348,6 +348,15 @@ class Agent:
         max_iterations  = 60
         silent_stops    = 0  # consecutive turns with no content and no tools
 
+        # Inject initial workspace snapshot so model knows what already exists.
+        # Prevents repeated "startproject" / "mkdir" when workspace is not empty.
+        if work_mode:
+            try:
+                snapshot = self._workspace_snapshot()
+                messages.append({"role": "user", "content": snapshot})
+            except Exception:
+                pass
+
         for iteration in range(max_iterations):
             if self._stop:
                 break
@@ -452,7 +461,7 @@ class Agent:
                         messages.append({"role": "user", "content": next_msg})
 
                         # Periodic workspace snapshot to keep model oriented
-                        if tool_call_count % 8 == 0:
+                        if tool_call_count % 4 == 0:
                             snapshot = self._workspace_snapshot()
                             messages.append({"role": "user", "content": snapshot})
 

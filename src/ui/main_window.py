@@ -1,5 +1,6 @@
 import json
 import os
+import re as _re
 import shutil
 from datetime import datetime
 
@@ -351,10 +352,22 @@ class MainWindow(QMainWindow):
 
     def _on_agent_tool(self, name: str, args: str, result: str):
         self.chat.add_tool_message(name, args, result)
+        # Mirror every tool call to the LM Studio log panel
+        # so the right-side logs are never empty during a work session.
+        short_args   = args[:120] + ("…" if len(args) > 120 else "")
+        short_result = result[:200] + ("…" if len(result) > 200 else "")
+        self.log_panel.append_lm_log(f"▶ {name}({short_args})")
+        self.log_panel.append_lm_log(f"  {short_result}")
 
-    def _on_stream_start(self):  self.chat.begin_stream()
+    def _on_stream_start(self):
+        self.chat.begin_stream()
+        self.log_panel.append_lm_log("── thinking ──────────────────────")
+
     def _on_stream_delta(self, c): self.chat.append_stream(c)
-    def _on_stream_end(self):    self.chat.end_stream()
+
+    def _on_stream_end(self):
+        self.chat.end_stream()
+        self.log_panel.append_lm_log("── done ───────────────────────────")
 
     def _on_agent_done(self):
         self.chat.set_busy(False)
