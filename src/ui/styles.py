@@ -50,6 +50,13 @@ QWidget {
     border-radius: 0; text-align: left;
 }
 #settingsBtn:hover { background-color: #0d0d0d; color: #777777; }
+#clearBtn {
+    background-color: transparent; color: #3a2020;
+    border: none; border-top: 1px solid #111111;
+    font-size: 11px; padding: 9px 16px; margin: 0;
+    border-radius: 0; text-align: left;
+}
+#clearBtn:hover { background-color: #130a0a; color: #884444; }
 
 /* ── Top bar ─────────────────────────── */
 #chatTopBar {

@@ -168,7 +168,9 @@ class Agent:
 
     def _emit_tool(self, name: str, args: str, result: str):
         if self.on_tool_call:
-            self.on_tool_call(name, args, result)
+            # Guard: PyQt signal expects str; non-string args/result cause
+            # "'int' object has no attribute 'strip'" downstream.
+            self.on_tool_call(str(name), str(args), str(result))
 
     def _get_system_prompt(self, mode: str) -> str:
         memories = self.db.get_memories_text()

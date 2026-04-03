@@ -113,11 +113,20 @@ WORK_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a text file from the uploads/ directory.",
+            "description": (
+                "Read a text file. Accepts: (1) a filename relative to uploads/ "
+                "(e.g. 'report.txt'), or (2) an absolute path inside /workspace/ "
+                "(e.g. '/workspace/portfolio/models.py')."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Filename in uploads/"}
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Relative filename in uploads/ OR absolute /workspace/... path"
+                        )
+                    }
                 },
                 "required": ["path"]
             }

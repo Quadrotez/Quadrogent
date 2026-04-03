@@ -129,6 +129,19 @@ class MainWindow(QMainWindow):
         self.chat_list.customContextMenuRequested.connect(self._chat_context_menu)
         sb.addWidget(self.chat_list, 1)
 
+        # ── Clear buttons ─────────────────────────────────
+        clear_ws_btn = QPushButton("🗑  Очистить workspace")
+        clear_ws_btn.setObjectName("clearBtn")
+        clear_ws_btn.setToolTip("Удалить все файлы в /workspace (кроме uploads/ и tmp/)")
+        clear_ws_btn.clicked.connect(self._clear_workspace)
+        sb.addWidget(clear_ws_btn)
+
+        clear_up_btn = QPushButton("🗑  Очистить uploads")
+        clear_up_btn.setObjectName("clearBtn")
+        clear_up_btn.setToolTip("Удалить все файлы в uploads/")
+        clear_up_btn.clicked.connect(self._clear_uploads)
+        sb.addWidget(clear_up_btn)
+
         settings_btn = QPushButton("⚙  Настройки")
         settings_btn.setObjectName("settingsBtn")
         settings_btn.clicked.connect(self._open_settings)
@@ -561,6 +574,52 @@ a{{color:#6a9fd8;text-decoration:none}}
 <div class="meta">Quadrogent · {safe_exported}</div></header>
 {msg_html}</body></html>"""
 
+
+    # ── Clear workspace / uploads ───────────────────────────
+
+    def _clear_workspace(self):
+        reply = QMessageBox.question(
+            self, "Очистить workspace",
+            "Удалить все файлы в /workspace (кроме uploads/ и tmp/)?\n\nЭто действие необратимо.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        if not self.agent.docker.container:
+            QMessageBox.warning(self, "Ошибка", "Docker-контейнер не запущен.")
+            return
+        # Remove everything except the mounted subdirs
+        cmd = (
+            "find /workspace -mindepth 1 -maxdepth 1 "
+            r"! -name 'uploads' ! -name 'tmp' "
+            "-exec rm -rf {} + 2>/dev/null; echo done"
+        )
+        ec, out = self.agent.docker.execute(cmd)
+        if ec == 0:
+            QMessageBox.information(self, "Готово", "Workspace очищен.")
+        else:
+            QMessageBox.warning(self, "Ошибка", f"Команда завершилась с кодом {ec}:\n{out}")
+
+    def _clear_uploads(self):
+        reply = QMessageBox.question(
+            self, "Очистить uploads",
+            "Удалить все файлы в uploads/?\n\nЭто действие необратимо.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            base = os.path.abspath(self.agent.files.base_dir)
+            deleted = 0
+            for entry in os.listdir(base):
+                ep = os.path.join(base, entry)
+                shutil.rmtree(ep) if os.path.isdir(ep) else os.remove(ep)
+                deleted += 1
+            QMessageBox.information(self, "Готово", f"Удалено элементов: {deleted}.")
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
 
     # ── Settings ───────────────────────────────────────────
 

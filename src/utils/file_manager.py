@@ -4,29 +4,46 @@ import shutil
 
 UPLOADS_DIR = "uploads"
 
+# Paths outside uploads/ that are always allowed for read/write
+ALLOWED_ROOTS = ["/workspace"]
+
 
 class FileManager:
-    """Manage files in the uploads directory."""
+    """Manage files in the uploads directory, plus allowed external roots."""
 
     def __init__(self, base_dir: str = UPLOADS_DIR):
         self.base_dir = base_dir
         os.makedirs(self.base_dir, exist_ok=True)
 
     def _safe_path(self, relative: str) -> str:
-        """Resolve path safely, preventing traversal outside base_dir."""
+        """Resolve path safely.
+
+        Rules:
+        - Absolute paths under ALLOWED_ROOTS (e.g. /workspace/...) → allowed as-is.
+        - Relative paths → resolved under base_dir (uploads/).
+        - Absolute paths outside both base_dir and ALLOWED_ROOTS → rejected.
+        """
         base_abs = os.path.abspath(self.base_dir)
-        # If the caller already passes an absolute path, use it directly (still check)
+
         if os.path.isabs(relative):
             full = os.path.normpath(relative)
+            # Allow if under base_dir
+            if full == base_abs or full.startswith(base_abs + os.sep):
+                return full
+            # Allow if under any whitelisted root
+            for root in ALLOWED_ROOTS:
+                root_abs = os.path.normpath(root)
+                if full == root_abs or full.startswith(root_abs + os.sep):
+                    return full
+            raise ValueError(f"Path outside allowed directories: {relative!r}")
         else:
             full = os.path.abspath(os.path.join(self.base_dir, relative))
-        if not (full == base_abs or full.startswith(base_abs + os.sep)):
-            raise ValueError(f"Path traversal detected: {relative!r}")
-        return full
+            if not (full == base_abs or full.startswith(base_abs + os.sep)):
+                raise ValueError(f"Path traversal detected: {relative!r}")
+            return full
 
     def read(self, path: str) -> str:
         full = self._safe_path(path)
-        # Try text first; for binary files (PDF, etc.) return a notice
         try:
             with open(full, "r", encoding="utf-8", errors="replace") as f:
                 return f.read()
@@ -36,7 +53,9 @@ class FileManager:
     def write(self, path: str, content: str) -> str:
         """Write file and return its absolute path."""
         full = self._safe_path(path)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
+        parent = os.path.dirname(full)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:
             f.write(content)
         return full
