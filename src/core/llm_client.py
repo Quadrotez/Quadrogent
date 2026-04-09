@@ -29,7 +29,7 @@ WORK_TOOLS = [
             "name": "execute_command",
             "description": (
                 "Execute a shell command in Docker (Ubuntu 22.04, root, internet). "
-                "Working dir: /workspace. User files delivered via: /workspace/uploads/. "
+                "Working dir: /workspace. All files must be created in /workspace/. "
                 "Use heredoc to create files:\n"
                 "  cat > /workspace/project/file.py << 'EOF'\n"
                 "  file content here\n"
@@ -79,16 +79,16 @@ WORK_TOOLS = [
         "function": {
             "name": "deliver_file",
             "description": (
-                "Deliver a file from /workspace/uploads/ to the user as a download. "
+                "Deliver a file from /workspace/ to the user as a download. "
                 "MUST be called as the FINAL step after zipping the result. "
-                "Workflow: execute_command('zip -r uploads/result.zip project/') → deliver_file('result.zip')"
+                "Workflow: execute_command('cd /workspace && zip -r result.zip project/') → deliver_file('result.zip')"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Filename in uploads/ (e.g. 'portfolio.zip')"
+                        "description": "Filename in /workspace/ (e.g. 'portfolio.zip')"
                     }
                 },
                 "required": ["path"]
@@ -114,7 +114,7 @@ WORK_TOOLS = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read a text file. Accepts: (1) a filename relative to uploads/ "
+                "Read a text file. Accepts: (1) a filename relative to /workspace/ "
                 "(e.g. 'report.txt'), or (2) an absolute path inside /workspace/ "
                 "(e.g. '/workspace/portfolio/models.py')."
             ),
@@ -124,7 +124,7 @@ WORK_TOOLS = [
                     "path": {
                         "type": "string",
                         "description": (
-                            "Relative filename in uploads/ OR absolute /workspace/... path"
+                            "Relative filename in /workspace/ OR absolute /workspace/... path"
                         )
                     }
                 },
@@ -142,7 +142,7 @@ AUTO_TOOLS = WORK_TOOLS + [
         "function": {
             "name": "write_file",
             "description": (
-                "Write a single text file to uploads/ and deliver it to the user. "
+                "Write a single text file to /workspace/ and deliver it to the user. "
                 "Use for simple tasks: 'write me a script', 'create a config file'. "
                 "NOT for project scaffolding — use execute_command+heredoc for that."
             ),
@@ -166,7 +166,7 @@ AUTO_TOOLS = WORK_TOOLS + [
         "type": "function",
         "function": {
             "name": "delete_file",
-            "description": "Delete a file/folder from uploads/. Use '.' to clear all.",
+            "description": "Delete a file/folder from /workspace/. Use '.' to clear all.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -180,7 +180,7 @@ AUTO_TOOLS = WORK_TOOLS + [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "List files in the uploads/ directory.",
+            "description": "List files in the /workspace/ directory.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -193,6 +193,7 @@ class LLMClient:
         self.model: str | None = None
         self.session = requests.Session()
         self._active_response = None
+        self.on_log: callable | None = None  # Callback для логирования
 
     def abort(self):
         r = self._active_response
@@ -240,12 +241,30 @@ class LLMClient:
         return self._stream(payload) if stream else self._complete(payload)
 
     def _complete(self, payload: dict) -> dict:
+        if self.on_log:
+            self.on_log(f"[REQUEST] {payload.get('model', 'unknown')}")
+            self.on_log(f"Messages: {len(payload.get('messages', []))} msg(s)")
+            if payload.get('tools'):
+                self.on_log(f"Tools: {len(payload['tools'])} tool(s)")
+        
         r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload, timeout=300,
         )
         r.raise_for_status()
         data = r.json()
+        
+        if self.on_log:
+            choice = data.get("choices", [{}])[0]
+            msg = choice.get("message", {})
+            content = msg.get("content", "")
+            tool_calls = msg.get("tool_calls")
+            self.on_log(f"[RESPONSE] finish_reason={choice.get('finish_reason')}")
+            if content:
+                self.on_log(f"Content: {len(content)} chars")
+            if tool_calls:
+                self.on_log(f"Tool calls: {len(tool_calls)}")
+        
         choice = data["choices"][0]
         msg = choice["message"]
         return {
@@ -261,6 +280,12 @@ class LLMClient:
           {"type": "tool_calls",   "tool_calls": list}
           {"type": "finish",       "reason": str}   ← NEW: always emitted at end
         """
+        if self.on_log:
+            self.on_log(f"[STREAM REQUEST] {payload.get('model', 'unknown')}")
+            self.on_log(f"Messages: {len(payload.get('messages', []))} msg(s)")
+            if payload.get('tools'):
+                self.on_log(f"Tools: {len(payload['tools'])} tool(s), choice={payload.get('tool_choice', 'auto')}")
+        
         r = self.session.post(
             f"{self.base_url}/chat/completions",
             json=payload, stream=True, timeout=300,
@@ -271,6 +296,8 @@ class LLMClient:
 
         tc_asm: dict[int, dict] = {}
         finish_reason = "stop"
+        total_chars = 0
+        stream_error: Exception | None = None
 
         try:
             for line in r.iter_lines(decode_unicode=True):
@@ -291,6 +318,7 @@ class LLMClient:
 
                     text = delta.get("content") or ""
                     if text:
+                        total_chars += len(text)
                         yield {"type": "delta", "content": text}
 
                     for tc in delta.get("tool_calls", []):
@@ -305,10 +333,20 @@ class LLMClient:
 
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
-        except Exception:
-            pass
+        except Exception as e:
+            stream_error = e
+            if self.on_log:
+                self.on_log(f"[STREAM ERROR] {type(e).__name__}: {e}")
 
         self._active_response = None
+
+        if self.on_log:
+            self.on_log(f"[STREAM RESPONSE] finish_reason={finish_reason}")
+            if total_chars > 0:
+                self.on_log(f"Content: {total_chars} chars")
+            if tc_asm:
+                tool_names = [tc_asm[i]["name"] for i in sorted(tc_asm.keys())]
+                self.on_log(f"Tool calls: {', '.join(tool_names)}")
 
         if tc_asm:
             yield {
@@ -320,4 +358,4 @@ class LLMClient:
             }
 
         # Always emit finish so agent knows the model is done generating
-        yield {"type": "finish", "reason": finish_reason}
+        yield {"type": "finish", "reason": finish_reason, "stream_error": stream_error}

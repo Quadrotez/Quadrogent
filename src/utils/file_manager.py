@@ -2,14 +2,14 @@ import os
 import shutil
 
 
-UPLOADS_DIR = "uploads"
+UPLOADS_DIR = "workspace"
 
-# Paths outside uploads/ that are always allowed for read/write
+# Paths outside workspace/ that are always allowed for read/write
 ALLOWED_ROOTS = ["/workspace"]
 
 
 class FileManager:
-    """Manage files in the uploads directory, plus allowed external roots."""
+    """Manage files in the workspace directory, plus allowed external roots."""
 
     def __init__(self, base_dir: str = UPLOADS_DIR):
         self.base_dir = base_dir

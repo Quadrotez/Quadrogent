@@ -81,6 +81,28 @@ class DockerManager:
         with self._lock:
             try:
                 self.container = self.client.containers.get(CONTAINER_NAME)
+
+                # ── Verify volume mount is correct ──────────────────────────
+                workspace_abs = os.path.abspath("workspace")
+                mounts = self.container.attrs.get("Mounts", [])
+                mount_ok = any(
+                    os.path.normpath(m.get("Source", "")) == os.path.normpath(workspace_abs)
+                    and m.get("Destination") == "/workspace"
+                    for m in mounts
+                )
+                if not mount_ok:
+                    self._log("warn",
+                        f"Volume mount устарел (контейнер создан с другим путём). "
+                        f"Пересоздаю контейнер…"
+                    )
+                    try:
+                        self.container.stop(timeout=5)
+                    except Exception:
+                        pass
+                    self.container.remove(force=True)
+                    raise docker.errors.NotFound("stale mount — recreate")
+                # ────────────────────────────────────────────────────────────
+
                 if self.container.status != "running":
                     self._log("info", f"Контейнер найден (статус: {self.container.status}). Запускаю…")
                     self.container.start()
@@ -94,8 +116,8 @@ class DockerManager:
                     self._log("info", "Контейнер уже запущен.")
             except docker.errors.NotFound:
                 self._log("info", f"Создаю новый контейнер ({IMAGE})…")
-                uploads_abs = os.path.abspath("uploads")
-                os.makedirs(uploads_abs, exist_ok=True)
+                workspace_abs = os.path.abspath("workspace")
+                os.makedirs(workspace_abs, exist_ok=True)
                 self.container = self.client.containers.run(
                     IMAGE,
                     name=CONTAINER_NAME,
@@ -103,7 +125,7 @@ class DockerManager:
                     detach=True,
                     network_mode="bridge",
                     dns=["8.8.8.8", "1.1.1.1"],   # explicit DNS — avoids host DNS misconfiguration
-                    volumes={uploads_abs: {"bind": "/workspace/uploads", "mode": "rw"}},
+                    volumes={workspace_abs: {"bind": "/workspace", "mode": "rw"}},
                     working_dir="/workspace",
                     environment=APT_ENV,
                     tty=True,
@@ -274,7 +296,8 @@ class DockerManager:
                     self._log("ok" if c == 0 else "error",
                                f"{apt_pkg}: {'установлен' if c == 0 else f'ОШИБКА (код {c})'}")
 
-        self._exec("mkdir -p /workspace/uploads /workspace/tmp")
+        # Ensure workspace dirs exist, clean up stale uploads/ from old versions
+        self._exec("mkdir -p /workspace/tmp && rm -rf /workspace/uploads")
 
         self._log("info", "─── Проверка установленных инструментов ──────")
         all_ok = True
@@ -375,3 +398,29 @@ class DockerManager:
                 self._ready_event.clear()
         except Exception:
             pass
+
+    def copy_from_container(self, container_path: str, host_dest: str) -> bool:
+        """Copy a single file from Docker to the host filesystem.
+
+        Uses the Docker SDK get_archive (tar stream) — works even when
+        the bind mount is missing or was created against a stale path.
+        Returns True on success, False on any failure.
+        """
+        import io
+        import tarfile
+        try:
+            bits, _ = self.container.get_archive(container_path)
+            buf = io.BytesIO()
+            for chunk in bits:
+                buf.write(chunk)
+            buf.seek(0)
+            with tarfile.open(fileobj=buf) as tf:
+                members = tf.getmembers()
+                if not members:
+                    return False
+                member = members[0]
+                member.name = os.path.basename(host_dest)
+                tf.extract(member, path=os.path.dirname(os.path.abspath(host_dest)))
+            return os.path.exists(host_dest)
+        except Exception:
+            return False

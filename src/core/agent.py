@@ -43,18 +43,28 @@ You are Quadrogent — an autonomous execution agent. Respond in the user's lang
 ENVIRONMENT: Docker Ubuntu 22.04. Root access, internet available.
 Pre-installed: python3, pip3, python3-venv, zip, unzip, curl, wget, git, jq.
 Project workspace: /workspace/
-Deliver results here: /workspace/uploads/
+All files you create will be visible in the user's file explorer.
+
+━━━ CRITICAL: YOU MUST COMPLETE THE TASK ━━━
+Your PRIMARY GOAL is to COMPLETE the user's task FULLY, not just describe how to do it.
+You MUST keep working until deliver_file has been called successfully.
+NEVER stop after making a plan. NEVER stop after describing steps.
+EXECUTE EVERY STEP until the task is DONE.
 
 ━━━ MANDATORY RULES ━━━
 1. ALWAYS call a tool every turn. NEVER output text without a tool call.
-2. ALL project files go in /workspace/ — create them with execute_command + heredoc.
-3. The uploads/ dir is ONLY for final deliverables (zip files, etc).
-4. Do NOT use write_file — it does not exist in this mode. Use execute_command.
-5. After each tool result: read the output, then call the next tool immediately.
-6. If exit code != 0: fix the exact error shown in stderr and retry.
-7. Never repeat a failing command unchanged. Always fix it first.
-8. install_packages is the ONLY way to install packages — never apt-get/pip in execute_command.
-9. FINISH by zipping the project, copying to uploads/, then calling deliver_file.
+2. ALL files go in /workspace/ — create them with execute_command + heredoc.
+3. Do NOT use write_file — it does not exist in this mode. Use execute_command.
+4. After each tool result: read the output, then call the next tool immediately.
+5. If exit code != 0: fix the exact error shown in stderr and retry.
+6. Never repeat a failing command unchanged. Always fix it first.
+7. install_packages is the ONLY way to install packages — never apt-get/pip in execute_command.
+8. FINISH by zipping in /workspace/, then calling deliver_file with the zip filename.
+9. DO NOT STOP until deliver_file is called. Keep going even if you think you're done.
+10. ⚠️ NEVER install the same package twice! If install_packages returns [OK], the package is INSTALLED.
+11. ⚠️ READ tool output! If you see [OK] or "already satisfied", DO NOT repeat the command.
+12. ⚠️ CRITICAL: There is NO "uploads/" directory! NEVER use "uploads/" in ANY command!
+13. ⚠️ WRONG: zip -r uploads/file.zip | RIGHT: zip -r file.zip
 
 ━━━ HOW TO CREATE FILES (heredoc) ━━━
 execute_command:
@@ -65,14 +75,44 @@ execute_command:
       return render(request, 'home.html', {})
   EOF
 
+━━━ HOW TO CREATE DJANGO/FLASK PROJECTS ━━━
+DJANGO:
+  execute_command: cd /workspace && django-admin startproject mysite
+  # This creates /workspace/mysite/ directory with manage.py inside
+  # DO NOT use target directory argument if dir already exists!
+  
+FLASK:
+  execute_command:
+    mkdir -p /workspace/myapp && cat > /workspace/myapp/app.py << 'EOF'
+    from flask import Flask
+    app = Flask(__name__)
+    @app.route('/')
+    def hello(): return "Hello World"
+    if __name__ == '__main__': app.run()
+    EOF
+
 ━━━ WRONG (DO NOT DO THIS) ━━━
   ✗ write_file("portfolio/views.py", "...") — write_file does not exist here
   ✗ execute_command("pip install django") — use install_packages instead
-  ✗ Creating files in /workspace/uploads/ — that's only for the final zip
+  ✗ Stopping after making a plan — EXECUTE THE PLAN, don't just describe it
+  ✗ Saying "Now we can..." — NO, JUST DO IT with execute_command
+  ✗ django-admin startproject name /existing/dir — use WITHOUT target if dir exists
+  ✗ zip -r result.zip . — zips everything including hidden files
+  ✗ Correct: cd /workspace && zip -r myproject.zip myproject/
 
 ━━━ COMPLETION SEQUENCE ━━━
-  execute_command: cd /workspace && zip -r uploads/portfolio.zip portfolio/
+Step 1: Create project in /workspace/
+Step 2: Zip it IN /workspace/ (NOT in uploads/!):
+  execute_command: cd /workspace && zip -r portfolio.zip portfolio/
+Step 3: Deliver the zip (just the filename):
   deliver_file: portfolio.zip
+
+⚠️ CRITICAL: The zip MUST be in /workspace/, NOT in uploads/!
+⚠️ WRONG: zip -r uploads/portfolio.zip portfolio/
+✓ RIGHT: cd /workspace && zip -r portfolio.zip portfolio/
+
+Remember: Your job is NOT to explain what needs to be done.
+Your job is to DO IT by calling tools until deliver_file succeeds.
 """
 
 SYSTEM_TALK = """\
@@ -82,14 +122,14 @@ Mode: Talk — have a normal conversation. Use markdown formatting.
 
 SYSTEM_AUTO = """\
 You are Quadrogent — autonomous AI agent. Respond in the user's language.
-Workspace: /workspace/ | Deliver files via: /workspace/uploads/
+Workspace: /workspace/ (all files created here are visible to the user)
 Pre-installed: python3, pip3, zip, unzip, curl, wget, git, python3-venv.
 
 For action tasks:
   - Call tools immediately. Do NOT just describe steps.
   - Create project files in /workspace/ using execute_command with heredoc.
   - install_packages for installing packages (never apt-get/pip in execute_command).
-  - Finish with: zip → uploads/ → deliver_file.
+  - Finish with: zip project → deliver_file.
 
 For questions: just answer with markdown.
 """
@@ -99,15 +139,30 @@ MEMORY_SUMMARIZE_PROMPT = (
 )
 
 _HARD_REFORCE = (
-    "STOP. You output text without calling a tool. In work mode you MUST call a tool every turn.\n"
-    "Call execute_command or install_packages RIGHT NOW. Do not write any text."
+    "❌ CRITICAL ERROR: You output text without calling a tool.\n"
+    "In work mode you MUST call a tool every turn. NO EXCEPTIONS.\n"
+    "DO NOT write explanations. DO NOT make plans.\n"
+    "Call execute_command or install_packages RIGHT NOW to continue the task.\n"
+    "The user's task is NOT complete. Keep working."
 )
 
 # Injected when model does a silent stop (finish_reason=stop, no content, no tools)
 _SILENT_STOP_REFORCE = (
-    "The task is NOT complete. You stopped without calling a tool or writing anything.\n"
-    "You MUST call a tool RIGHT NOW to continue the task.\n"
-    "What is the next step? Execute it immediately with execute_command."
+    "❌ ERROR: You stopped without completing the task.\n"
+    "The task is NOT done. deliver_file was NOT called.\n"
+    "You MUST continue working by calling the next tool RIGHT NOW.\n"
+    "What is the next step to complete the task? Execute it immediately with execute_command.\n"
+    "DO NOT describe what needs to be done. JUST DO IT."
+)
+
+# Injected when model tries to use uploads/ directory
+_UPLOADS_ERROR = (
+    "❌ CRITICAL: You used 'uploads/' in your command!\n"
+    "There is NO uploads/ directory! It does NOT exist!\n"
+    "NEVER use 'uploads/' in any command.\n\n"
+    "WRONG: zip -r uploads/file.zip project/\n"
+    "RIGHT: cd /workspace && zip -r file.zip project/\n\n"
+    "Fix this RIGHT NOW by calling execute_command with the CORRECT path."
 )
 
 
@@ -115,15 +170,20 @@ def _make_next_step(tool_name: str, exit_code, output_snippet: str) -> str:
     """Context-aware continue prompt injected after each tool result."""
     if exit_code is not None and exit_code != 0:
         return (
-            f"[Tool '{tool_name}' FAILED — exit code {exit_code}]\n"
-            f"Error: {output_snippet[:500]}\n"
-            "You MUST fix this error. Read the error carefully, then call execute_command "
-            "with the corrected command. Do NOT move to the next step until this is fixed."
+            f"❌ [Tool '{tool_name}' FAILED — exit code {exit_code}]\n"
+            f"Error output: {output_snippet[:500]}\n\n"
+            "CRITICAL: This error MUST be fixed before continuing.\n"
+            "1. Read the error message carefully\n"
+            "2. Identify the exact problem\n"
+            "3. Call execute_command with the CORRECTED command\n"
+            "DO NOT move to the next step until this is fixed.\n"
+            "DO NOT explain what's wrong - FIX IT."
         )
     return (
-        f"[Tool '{tool_name}' succeeded]\n"
-        "Call the NEXT tool immediately. Keep working. "
-        "Do NOT stop until deliver_file has been called."
+        f"✓ [Tool '{tool_name}' succeeded]\n\n"
+        "Good! Now call the NEXT tool immediately to continue.\n"
+        "Keep working until deliver_file has been called.\n"
+        "DO NOT stop. DO NOT wait. Call the next tool NOW."
     )
 
 
@@ -156,11 +216,20 @@ class Agent:
         self.on_stream_delta: Callable[[str], None]            | None = None
         self.on_stream_end:   Callable[[], None]               | None = None
         self.on_file_ready:   Callable[[str, str], None]       | None = None
+        self.on_lm_log:       Callable[[str], None]            | None = None  # NEW: LM Studio логи
         self._stop = False
+        
+        # Установка callback для логирования LLM
+        self.llm.on_log = self._log_lm
 
     def stop(self):
         self._stop = True
         self.llm.abort()
+
+    def _log_lm(self, message: str):
+        """Forward LM Studio logs to UI."""
+        if self.on_lm_log:
+            self.on_lm_log(message)
 
     def _emit(self, role: str, content: str):
         if self.on_message:
@@ -184,16 +253,12 @@ class Agent:
     def _workspace_snapshot(self) -> str:
         """Get current state of /workspace for context injection."""
         exit_code, output = self.docker.execute(
-            "find /workspace -not -path '*/\\.*' -not -path '*/uploads/*' "
-            "| head -60 | sort 2>/dev/null || echo '(empty)'"
-        )
-        _, files_in_uploads = self.docker.execute(
-            "ls /workspace/uploads/ 2>/dev/null || echo '(empty)'"
+            "find /workspace -not -path '*/\\.*' "
+            "| head -80 | sort 2>/dev/null || echo '(empty)'"
         )
         return (
             f"[WORKSPACE STATE]\n"
             f"/workspace files:\n{output.strip()}\n\n"
-            f"/workspace/uploads/ contents: {files_in_uploads.strip()}\n"
             "Continue the task based on what is already created above."
         )
 
@@ -203,6 +268,19 @@ class Agent:
 
         if name == "execute_command":
             cmd = arguments.get("command", "")
+            
+            # Check for uploads/ usage
+            if "uploads/" in cmd or "uploads\\" in cmd:
+                error_msg = (
+                    "❌ ERROR: Command contains 'uploads/' which does NOT exist!\n"
+                    f"Your command: {cmd[:200]}\n\n"
+                    "There is NO uploads/ directory in /workspace.\n"
+                    "CORRECT: cd /workspace && zip -r myfile.zip myproject/\n"
+                    "WRONG: zip -r uploads/myfile.zip myproject/"
+                )
+                self._emit_tool(name, cmd[:100], error_msg)
+                return error_msg
+            
             # Intercept raw apt-get → safe handler
             if re.search(r"(?:^|&&|\|)\s*apt(?:-get)?\s+install\b", cmd, re.MULTILINE):
                 m = re.search(
@@ -217,8 +295,21 @@ class Agent:
                         result = f"[intercepted apt | exit code: {ec}]\n{out}"
                         self._emit_tool(name, cmd, result)
                         return result
+            # Timestamp before command so we can detect newly created/modified files
+            self.docker.execute("touch /tmp/.cmd_ts 2>/dev/null")
             ec, out = self.docker.execute(cmd)
-            result = f"[exit code: {ec}]\n{out}"
+            result = f"[exit code: {ec}]\n{out}" if out.strip() else f"[exit code: {ec}]"
+
+            # After a successful command, show what changed in /workspace/
+            # This prevents the model from recreating files it already created
+            if ec == 0:
+                _, new_files = self.docker.execute(
+                    "find /workspace -newer /tmp/.cmd_ts "
+                    "-not -path '*/.*' -not -name '.gitkeep' 2>/dev/null | sort"
+                )
+                if new_files.strip():
+                    result += f"\n[Created/modified:\n{new_files.strip()}]"
+
             self._emit_tool(name, cmd, result)
             return result
 
@@ -232,6 +323,14 @@ class Agent:
         elif name == "read_file":
             path = arguments.get("path", "")
             try:
+                # Absolute /workspace/... paths live inside Docker, not on host
+                if path.startswith("/workspace/"):
+                    ec, out = self.docker.execute(f"cat {path} 2>&1")
+                    if ec != 0:
+                        self._emit_tool(name, path, f"Error: {out.strip()}")
+                        return f"Error: {out.strip()}"
+                    self._emit_tool(name, path, f"[{len(out)} chars]")
+                    return out
                 content = self.files.read(path)
                 self._emit_tool(name, path, f"[{len(content)} chars]")
                 return content
@@ -283,13 +382,18 @@ class Agent:
 
         elif name == "list_files":
             try:
-                files = self.files.list_files()
-                result = (f"Files ({len(files)}):\n" + "\n".join(f"  {f}" for f in files)
-                          if files else "uploads/ is empty")
+                ec, out = self.docker.execute(
+                    "find /workspace -not -path '*/.*' -not -name '.gitkeep' "
+                    "| sort | head -200 2>/dev/null"
+                )
+                if ec == 0 and out.strip():
+                    result = f"Docker /workspace contents:\n{out.strip()}"
+                else:
+                    result = "workspace/ is empty"
                 self._emit_tool(name, "", result)
                 return result
             except Exception:
-                return "uploads/ is empty"
+                return "workspace/ is empty"
 
         elif name == "install_packages":
             packages = arguments.get("packages", "").strip()
@@ -307,18 +411,28 @@ class Agent:
 
         elif name == "deliver_file":
             path = arguments.get("path", "").strip()
+            filename = os.path.basename(path) or path
+            workspace_abs = os.path.abspath("workspace")
+            host_dest = os.path.join(workspace_abs, filename)
+
+            # Always pull from Docker via get_archive — works even if bind-mount is broken
+            docker_path = f"/workspace/{filename}"
+            ec, _ = self.docker.execute(f"test -f {docker_path}")
+            if ec == 0:
+                os.makedirs(workspace_abs, exist_ok=True)
+                self.docker.copy_from_container(docker_path, host_dest)
+
             try:
-                abs_path = self.files._safe_path(path)
-                if not os.path.exists(abs_path):
-                    result = f"Error: '{path}' not found in uploads/"
-                    self._emit_tool(name, path, result)
+                if not os.path.exists(host_dest):
+                    result = f"Error: '{filename}' not found in Docker /workspace/"
+                    self._emit_tool(name, filename, result)
                     return result
-                self._emit_tool(name, path, f"Delivered: {abs_path}")
+                self._emit_tool(name, filename, f"Delivered: {host_dest}")
                 if self.on_file_ready:
-                    self.on_file_ready(path, abs_path)
-                return f"DELIVERED: {path}"
+                    self.on_file_ready(filename, host_dest)
+                return f"DELIVERED: {filename}"
             except Exception as e:
-                self._emit_tool(name, path, f"Error: {e}")
+                self._emit_tool(name, filename, f"Error: {e}")
                 return f"Error: {e}"
 
         return f"Unknown tool: {name}"
@@ -389,11 +503,24 @@ class Agent:
                         tool_calls = item["tool_calls"]
                     elif t == "finish":
                         finish_reason = item.get("reason", "stop")
+                        stream_error  = item.get("stream_error")
 
                 if self.on_stream_end:
                     self.on_stream_end()
 
                 display_content = _strip_think(raw_content)
+
+                # ── Stream error retry ────────────────────────────────────────
+                # Connection to LM Studio dropped mid-stream. The response is
+                # incomplete — retry the last request once automatically.
+                if stream_error and not tool_calls:
+                    stream_retries = getattr(self, "_stream_retries", 0)
+                    if stream_retries < 2:
+                        self._stream_retries = stream_retries + 1
+                        continue   # retry same messages
+                    self._stream_retries = 0
+                else:
+                    self._stream_retries = 0
 
                 # ── Post-delivery wrap-up ─────────────────────────────────────
                 if delivered:
@@ -430,6 +557,20 @@ class Agent:
                 if display_content.strip():
                     self.db.add_message(chat_id, "assistant", display_content)
                     messages.append({"role": "assistant", "content": display_content})
+
+                # ── finish_reason=length: tool call arguments got cut off ─────
+                # Model hit max_tokens in the middle of generating tool args.
+                # The call is malformed/empty — skip it and re-prompt to continue.
+                if finish_reason == "length":
+                    _LENGTH_MSG = (
+                        "⚠️ Your last response was cut off (max tokens reached). "
+                        "The tool call was incomplete and was NOT executed. "
+                        "Continue the task from where you left off — "
+                        "call the same tool again with full arguments."
+                    )
+                    messages.append({"role": "user", "content": _LENGTH_MSG})
+                    self.db.add_message(chat_id, "tool", _LENGTH_MSG)
+                    continue
 
                 # ── Execute tool calls ────────────────────────────────────────
                 for tc in tool_calls:

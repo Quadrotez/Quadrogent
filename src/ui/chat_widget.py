@@ -314,14 +314,32 @@ def _md_to_html(text: str) -> str:
         )
 
     text = _render_latex(text)
-    text = re.sub(r"```(\w*)\n(.*?)```", _fence, text, flags=re.DOTALL)
 
-    # Split out already-rendered code blocks
-    parts = re.split(r'(<div style="margin:10px.*?</div>)', text, flags=re.DOTALL)
+    # Extract code blocks BEFORE any html.escape, replace with unique placeholders.
+    # This avoids the broken nested-div regex split (the old split stopped at the
+    # first </div> inside the lang-label, leaving <pre>…</pre> exposed to escape).
+    _PLACEHOLDER = "\x00CODE{}\x00"
+    code_blocks: list[str] = []
+
+    def _fence_and_stash(m):
+        html_block = _fence(m)
+        idx = len(code_blocks)
+        code_blocks.append(html_block)
+        return _PLACEHOLDER.format(idx)
+
+    text = re.sub(r"```(\w*)\n(.*?)```", _fence_and_stash, text, flags=re.DOTALL)
+
+    # Now split on placeholders — safe because they contain no HTML
+    parts = re.split(r'(\x00CODE\d+\x00)', text)
     result = []
-    for i, part in enumerate(parts):
-        if i % 2 == 1:
-            result.append(part)
+    for part in parts:
+        if part.startswith("\x00CODE") and part.endswith("\x00"):
+            # Restore the pre-rendered code block as-is
+            try:
+                idx = int(part[5:-1])
+                result.append(code_blocks[idx])
+            except (ValueError, IndexError):
+                result.append(part)
             continue
         p = html.escape(part)
         # Inline code
@@ -754,9 +772,11 @@ class ChatWidget(QWidget):
 
     def _show_export_menu(self):
         menu = QMenu(self)
-        menu.addAction("🌐  HTML",   lambda: self.export_chat.emit("html"))
-        menu.addAction("📄  TXT",    lambda: self.export_chat.emit("txt"))
-        menu.addAction("📋  JSON",   lambda: self.export_chat.emit("json"))
+        menu.addAction("🌐  HTML",       lambda: self.export_chat.emit("html"))
+        menu.addAction("📄  TXT",        lambda: self.export_chat.emit("txt"))
+        menu.addAction("📋  JSON",       lambda: self.export_chat.emit("json"))
+        menu.addSeparator()
+        menu.addAction("🔧  Dev Logs",   lambda: self.export_chat.emit("devlogs"))
         menu.exec_(self._export_btn.mapToGlobal(self._export_btn.rect().bottomLeft()))
 
     def set_chat_title(self, title: str): self._chat_title = title
@@ -828,7 +848,12 @@ class ChatWidget(QWidget):
         else:
             llm_text = text
             self._append_message("user", text)
-        self.send_message.emit(llm_text)
+        
+        # Принудительная прокрутка после добавления сообщения пользователя
+        QTimer.singleShot(0, self._scroll_bottom)
+        
+        # Небольшая задержка перед отправкой, чтобы сообщение успело отрендериться
+        QTimer.singleShot(50, lambda: self.send_message.emit(llm_text))
 
     def _on_attach(self):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите файл")

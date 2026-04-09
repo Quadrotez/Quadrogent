@@ -12,12 +12,12 @@ from PyQt5.QtGui import QTextCursor, QColor, QTextCharFormat, QFont
 
 
 DOCKER_LEVEL_CFG = {
-    "info":  ("#484848", "  "),
-    "ok":    ("#3a7a4a", "✓ "),
-    "warn":  ("#8a6828", "⚠ "),
-    "error": ("#9a3838", "✗ "),
-    "cmd":   ("#3a6090", "$ "),
-    "out":   ("#363636", "  "),
+    "info":  ("#6a6a6a", "  "),
+    "ok":    ("#4a9a5a", "✓ "),
+    "warn":  ("#ca9a38", "⚠ "),
+    "error": ("#da4848", "✗ "),
+    "cmd":   ("#5a8ab0", "$ "),
+    "out":   ("#5a5a5a", "  "),
 }
 
 
@@ -95,7 +95,7 @@ class RightLogPanel(QWidget):
                 border: none;
                 font-family: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
                 font-size: 11px;
-                color: #333333;
+                color: #6a6a6a;
                 padding: 8px 12px;
             }
             QScrollBar:vertical { background: transparent; width: 3px; }
@@ -117,7 +117,7 @@ class RightLogPanel(QWidget):
                 border: none;
                 font-family: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
                 font-size: 11px;
-                color: #333333;
+                color: #6a6a6a;
                 padding: 8px 12px;
             }
             QScrollBar:vertical { background: transparent; width: 3px; }
@@ -173,7 +173,7 @@ class RightLogPanel(QWidget):
 
         # Timestamp
         ts_fmt = QTextCharFormat()
-        ts_fmt.setForeground(QColor("#1e1e1e"))
+        ts_fmt.setForeground(QColor("#6a6a6a"))  # СВЕТЛО-СЕРЫЙ, не #2e2e2e!
         ts_fmt.setFont(QFont("JetBrains Mono, Consolas", 10))
         now = datetime.now().strftime("%H:%M:%S")
         cursor.insertText(f"{now}  ", ts_fmt)
@@ -207,11 +207,11 @@ class RightLogPanel(QWidget):
         cursor = self._lm_log.textCursor()
         cursor.movePosition(QTextCursor.End)
         ts_fmt = QTextCharFormat()
-        ts_fmt.setForeground(QColor("#1e1e1e"))
+        ts_fmt.setForeground(QColor("#6a6a6a"))  # СВЕТЛО-СЕРЫЙ!
         now = datetime.now().strftime("%H:%M:%S")
         cursor.insertText(f"{now}  ", ts_fmt)
         msg_fmt = QTextCharFormat()
-        msg_fmt.setForeground(QColor("#3a3a3a"))
+        msg_fmt.setForeground(QColor("#9a9a9a"))  # ЕЩЁ СВЕТЛЕЕ для сообщений!
         cursor.insertText(message + "\n", msg_fmt)
         self._lm_log.setTextCursor(cursor)
         self._lm_log.ensureCursorVisible()
@@ -232,3 +232,13 @@ class RightLogPanel(QWidget):
                 "background: #070707; border-top: 1px solid #0f0f0f; "
                 "font-family: 'JetBrains Mono', monospace;"
             )
+
+    # ── Export logs ────────────────────────────────────────────
+
+    def get_docker_logs(self) -> str:
+        """Get all Docker logs as plain text."""
+        return self._docker_log.toPlainText()
+
+    def get_lm_logs(self) -> str:
+        """Get all LM Studio logs as plain text."""
+        return self._lm_log.toPlainText()

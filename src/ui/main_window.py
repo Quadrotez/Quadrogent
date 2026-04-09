@@ -29,6 +29,7 @@ class AgentWorker(QThread):
     stream_end_signal   = pyqtSignal()
     file_ready_signal   = pyqtSignal(str, str)
     finished_signal     = pyqtSignal()
+    lm_log_signal       = pyqtSignal(str)  # NEW: LM Studio логи
 
     def __init__(self, agent: Agent, chat_id: int, text: str, mode: str):
         super().__init__()
@@ -44,6 +45,7 @@ class AgentWorker(QThread):
         self.agent.on_stream_delta = lambda t: self.stream_delta_signal.emit(t)
         self.agent.on_stream_end   = lambda: self.stream_end_signal.emit()
         self.agent.on_file_ready   = lambda n, p: self.file_ready_signal.emit(n, p)
+        self.agent.on_lm_log       = lambda m: self.lm_log_signal.emit(m)  # NEW
         self.agent.run(self.chat_id, self.text, self.mode)
         self.finished_signal.emit()
 
@@ -133,15 +135,9 @@ class MainWindow(QMainWindow):
         # ── Clear buttons ─────────────────────────────────
         clear_ws_btn = QPushButton("🗑  Очистить workspace")
         clear_ws_btn.setObjectName("clearBtn")
-        clear_ws_btn.setToolTip("Удалить все файлы в /workspace (кроме uploads/ и tmp/)")
+        clear_ws_btn.setToolTip("Удалить все файлы в workspace/")
         clear_ws_btn.clicked.connect(self._clear_workspace)
         sb.addWidget(clear_ws_btn)
-
-        clear_up_btn = QPushButton("🗑  Очистить uploads")
-        clear_up_btn.setObjectName("clearBtn")
-        clear_up_btn.setToolTip("Удалить все файлы в uploads/")
-        clear_up_btn.clicked.connect(self._clear_uploads)
-        sb.addWidget(clear_up_btn)
 
         settings_btn = QPushButton("⚙  Настройки")
         settings_btn.setObjectName("settingsBtn")
@@ -342,6 +338,7 @@ class MainWindow(QMainWindow):
         self.worker.stream_end_signal.connect(self._on_stream_end)
         self.worker.file_ready_signal.connect(self._on_file_ready)
         self.worker.finished_signal.connect(self._on_agent_done)
+        self.worker.lm_log_signal.connect(self._on_lm_log)  # NEW: LM Studio логи
         self.worker.start()
 
     def _on_agent_message(self, role: str, content: str):
@@ -369,6 +366,10 @@ class MainWindow(QMainWindow):
         self.chat.end_stream()
         self.log_panel.append_lm_log("── done ───────────────────────────")
 
+    def _on_lm_log(self, message: str):
+        """Обработчик логов от LM Studio."""
+        self.log_panel.append_lm_log(message)
+
     def _on_agent_done(self):
         self.chat.set_busy(False)
         self.worker = None
@@ -394,11 +395,11 @@ class MainWindow(QMainWindow):
         if not self.current_chat_id:
             self._new_chat()
         filename = os.path.basename(filepath)
-        uploads_dir = os.path.normpath(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "uploads")
+        workspace_dir = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "workspace")
         )
-        os.makedirs(uploads_dir, exist_ok=True)
-        dest = os.path.join(uploads_dir, filename)
+        os.makedirs(workspace_dir, exist_ok=True)
+        dest = os.path.join(workspace_dir, filename)
         try:
             shutil.copy2(filepath, dest)
         except shutil.SameFileError:
@@ -445,6 +446,26 @@ class MainWindow(QMainWindow):
         messages = data["messages"]
         exported = data.get("exported_at", "")
         safe_title = "".join(c for c in title if c.isalnum() or c in " _-")[:40].strip() or "chat"
+        
+        if fmt == "devlogs":
+            # Developer logs export
+            ext = ".txt"
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Экспорт developer-логов", f"{safe_title}_devlogs{ext}",
+                "Текст (*.txt)"
+            )
+            if not path:
+                return
+            try:
+                content = self._export_devlogs(title, messages, exported)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.chat.status_label.setText(f"Экспортировано: {os.path.basename(path)}")
+                QTimer.singleShot(4000, lambda: self.chat.status_label.setText(""))
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка экспорта", str(e))
+            return
+        
         ext_map = {"html": ".html", "txt": ".txt", "json": ".json"}
         ext = ext_map.get(fmt, ".txt")
         path, _ = QFileDialog.getSaveFileName(
@@ -587,37 +608,84 @@ a{{color:#6a9fd8;text-decoration:none}}
 <div class="meta">Quadrogent · {safe_exported}</div></header>
 {msg_html}</body></html>"""
 
+    def _export_devlogs(self, title, messages, exported):
+        """Export comprehensive developer logs including chat history, Docker logs, and LM Studio logs."""
+        lines = [
+            "=" * 80,
+            f"QUADROGENT DEVELOPER LOGS",
+            "=" * 80,
+            f"Chat Title: {title}",
+            f"Exported: {exported}",
+            "=" * 80,
+            "",
+            "=" * 80,
+            "SECTION 1: CHAT HISTORY",
+            "=" * 80,
+            ""
+        ]
+        
+        # Chat history
+        for m in messages:
+            role = m["role"]
+            ts = m.get("ts", "")[:19].replace("T", " ") if m.get("ts") else ""
+            
+            if role == "user":
+                lines.append(f"[USER]" + (f"  {ts}" if ts else ""))
+                lines.append(m["content"])
+            elif role == "assistant":
+                lines.append(f"[ASSISTANT]" + (f"  {ts}" if ts else ""))
+                lines.append(m["content"])
+            elif role == "tool":
+                tool_name = m.get("tool", "tool")
+                content = m.get("content", "")
+                lines.append(f"[TOOL: {tool_name}]" + (f"  {ts}" if ts else ""))
+                lines.append(content)
+            lines.append("")
+        
+        # Docker logs
+        lines.extend([
+            "",
+            "=" * 80,
+            "SECTION 2: DOCKER LOGS",
+            "=" * 80,
+            ""
+        ])
+        docker_logs = self.log_panel.get_docker_logs()
+        if docker_logs:
+            lines.append(docker_logs)
+        else:
+            lines.append("(No Docker logs available)")
+        
+        # LM Studio logs
+        lines.extend([
+            "",
+            "=" * 80,
+            "SECTION 3: LM STUDIO LOGS",
+            "=" * 80,
+            ""
+        ])
+        lm_logs = self.log_panel.get_lm_logs()
+        if lm_logs:
+            lines.append(lm_logs)
+        else:
+            lines.append("(No LM Studio logs available)")
+        
+        lines.extend([
+            "",
+            "=" * 80,
+            "END OF DEVELOPER LOGS",
+            "=" * 80
+        ])
+        
+        return "\n".join(lines)
+
 
     # ── Clear workspace / uploads ───────────────────────────
 
     def _clear_workspace(self):
         reply = QMessageBox.question(
             self, "Очистить workspace",
-            "Удалить все файлы в /workspace (кроме uploads/ и tmp/)?\n\nЭто действие необратимо.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-        if not self.agent.docker.container:
-            QMessageBox.warning(self, "Ошибка", "Docker-контейнер не запущен.")
-            return
-        # Remove everything except the mounted subdirs
-        cmd = (
-            "find /workspace -mindepth 1 -maxdepth 1 "
-            r"! -name 'uploads' ! -name 'tmp' "
-            "-exec rm -rf {} + 2>/dev/null; echo done"
-        )
-        ec, out = self.agent.docker.execute(cmd)
-        if ec == 0:
-            QMessageBox.information(self, "Готово", "Workspace очищен.")
-        else:
-            QMessageBox.warning(self, "Ошибка", f"Команда завершилась с кодом {ec}:\n{out}")
-
-    def _clear_uploads(self):
-        reply = QMessageBox.question(
-            self, "Очистить uploads",
-            "Удалить все файлы в uploads/?\n\nЭто действие необратимо.",
+            "Удалить все файлы в workspace/?\n\nЭто действие необратимо.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -627,6 +695,8 @@ a{{color:#6a9fd8;text-decoration:none}}
             base = os.path.abspath(self.agent.files.base_dir)
             deleted = 0
             for entry in os.listdir(base):
+                if entry == '.gitkeep':  # Пропустить .gitkeep
+                    continue
                 ep = os.path.join(base, entry)
                 shutil.rmtree(ep) if os.path.isdir(ep) else os.remove(ep)
                 deleted += 1

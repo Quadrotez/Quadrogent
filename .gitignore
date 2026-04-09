@@ -23,6 +23,7 @@ env/
 # Project specific
 .cache/
 uploads/*
+workspace/*
 !uploads/.gitkeep
 
 # SQLite
