@@ -4,13 +4,13 @@ import glob
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 from src.ui.main_window import MainWindow
 from src.db.database import Database
 
 
 def clean_pyc_cache():
-    """Clean .pyc cache to ensure fresh module imports."""
     for pattern in ['**/*.pyc', '**/__pycache__']:
         for path in glob.glob(pattern, recursive=True):
             try:
@@ -24,9 +24,8 @@ def clean_pyc_cache():
 
 
 def main():
-    # Clean cache before starting
     clean_pyc_cache()
-    
+
     os.makedirs("workspace", exist_ok=True)
     os.makedirs(".cache", exist_ok=True)
 
@@ -34,8 +33,14 @@ def main():
     app.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app.setApplicationName("Quadrogent")
 
+    # Set window/taskbar icon (critical for KDE Plasma and other WMs)
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "logo.png")
+    if os.path.exists(logo_path):
+        app.setWindowIcon(QIcon(logo_path))
+
     db = Database()
     window = MainWindow(db)
+    window.setWindowIcon(QIcon(logo_path) if os.path.exists(logo_path) else QIcon())
     window.show()
 
     sys.exit(app.exec_())

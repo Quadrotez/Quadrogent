@@ -16,7 +16,7 @@ from datetime import datetime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
     QTextEdit, QPushButton, QLabel, QFileDialog,
-    QSizePolicy, QMenu, QComboBox,
+    QSizePolicy, QMenu, QComboBox, QApplication,
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QDesktopServices, QKeyEvent
@@ -492,16 +492,30 @@ def _file_size_str(path):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MessageInput(QTextEdit):
-    submitted = pyqtSignal()
+    submitted   = pyqtSignal()
+    file_pasted = pyqtSignal(str)   # path of pasted file
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(False)
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             if event.modifiers() & Qt.ShiftModifier:
                 super().keyPressEvent(event)
             else:
                 self.submitted.emit()
+        elif event.key() == Qt.Key_V and (event.modifiers() & Qt.ControlModifier):
+            clipboard = QApplication.clipboard()
+            mime = clipboard.mimeData()
+            if mime.hasUrls():
+                local = [u.toLocalFile() for u in mime.urls()
+                         if u.isLocalFile() and os.path.isfile(u.toLocalFile())]
+                if local:
+                    self.file_pasted.emit(local[0])
+                    return
+            # Fall through to normal paste
+            super().keyPressEvent(event)
         else:
             super().keyPressEvent(event)
 
@@ -766,7 +780,8 @@ class ChatWidget(QWidget):
     web_search_toggled   = pyqtSignal(bool)
     think_mode_toggled   = pyqtSignal(bool)
     mode_changed         = pyqtSignal(str)
-    log_toggle_requested = pyqtSignal()
+    log_toggle_requested     = pyqtSignal()
+    sidebar_toggle_requested = pyqtSignal()
 
     _STREAM_INTERVAL_MS = 40
 
@@ -807,8 +822,17 @@ class ChatWidget(QWidget):
         top_bar = QWidget()
         top_bar.setObjectName("chatTopBar")
         tl = QHBoxLayout(top_bar)
-        tl.setContentsMargins(14, 0, 12, 0)
+        tl.setContentsMargins(8, 0, 12, 0)
         tl.setSpacing(8)
+
+        self._sidebar_btn = QPushButton()
+        self._sidebar_btn.setObjectName("logToggleTopBtn")
+        self._sidebar_btn.setFixedSize(28, 28)
+        self._sidebar_btn.setToolTip("Скрыть/показать список чатов")
+        apply_icon(self._sidebar_btn, "bars-3", "#2a2a2a", 13)
+        self._sidebar_btn.clicked.connect(self.sidebar_toggle_requested.emit)
+        tl.addWidget(self._sidebar_btn)
+        tl.addSpacing(4)
 
         self.model_selector = ModelSelector()
         self.model_selector.model_changed.connect(self.model_changed.emit)
@@ -943,6 +967,7 @@ class ChatWidget(QWidget):
         self.input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.input.submitted.connect(self._on_send)
         self.input.textChanged.connect(self._adjust_height)
+        self.input.file_pasted.connect(self.attach_file.emit)
         row.addWidget(self.input, 1)
 
         self.send_btn = QPushButton()

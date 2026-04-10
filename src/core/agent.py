@@ -203,6 +203,18 @@ def _short_output(result: str, maxlen: int = 800) -> str:
     return ("..." + clean[-maxlen:]) if len(clean) > maxlen else clean
 
 
+
+LANG_INSTRUCTIONS = {
+    "auto": "Respond in the same language the user writes in.",
+    "ru":   "Always respond in Russian (на русском языке).",
+    "en":   "Always respond in English.",
+    "de":   "Always respond in German (auf Deutsch).",
+    "fr":   "Always respond in French (en français).",
+    "es":   "Always respond in Spanish (en español).",
+    "zh":   "Always respond in Chinese (用中文回答).",
+    "ja":   "Always respond in Japanese (日本語で答えてください).",
+}
+
 class Agent:
     def __init__(self, db: Database):
         self.db = db
@@ -253,6 +265,9 @@ class Agent:
 
     def _get_system_with_think(self, mode: str, think_mode: bool) -> str:
         base = self._get_system_prompt(mode)
+        lang = self.db.get_setting("language", "auto")
+        lang_instr = LANG_INSTRUCTIONS.get(lang, LANG_INSTRUCTIONS["auto"])
+        base += f"\n\n{lang_instr}"
         if not think_mode:
             base += "\n\nIMPORTANT: Do NOT use <think> blocks. Respond directly without internal reasoning tags."
         return base

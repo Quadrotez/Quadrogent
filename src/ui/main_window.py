@@ -58,10 +58,13 @@ class AgentWorker(QThread):
 
 
 class MainWindow(QMainWindow):
+    _title_ready = pyqtSignal(int, str)  # for thread-safe AI title update
+
     def __init__(self, db: Database):
         super().__init__()
         self.db = db
         self.agent = Agent(db)
+        self._title_ready.connect(self._refresh_title_in_list)
         self.current_chat_id: int | None = None
         self._worker_chat_id: int | None = None
         self.worker: AgentWorker | None = None
@@ -102,6 +105,8 @@ class MainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(230)
+        self._sidebar = sidebar  # keep reference for toggle
+        self._sidebar_visible = True
         sb = QVBoxLayout(sidebar)
         sb.setContentsMargins(0, 0, 0, 0)
         sb.setSpacing(0)
@@ -176,6 +181,7 @@ class MainWindow(QMainWindow):
         self.chat.think_mode_toggled.connect(self._on_think_mode_toggled)
         self.chat.mode_changed.connect(self._on_chat_mode_changed)
         self.chat.log_toggle_requested.connect(self._toggle_log_panel)
+        self.chat.sidebar_toggle_requested.connect(self._toggle_sidebar)
 
         self._main_splitter.addWidget(self.chat)
 
@@ -192,6 +198,27 @@ class MainWindow(QMainWindow):
         ml.addWidget(self._main_splitter)
 
     # ── Log panel toggle ───────────────────────────────────
+
+    def _toggle_sidebar(self):
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        if self._sidebar_visible:
+            self._sidebar_visible = False
+            anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
+            anim.setDuration(200)
+            anim.setStartValue(230)
+            anim.setEndValue(0)
+            anim.setEasingCurve(QEasingCurve.InCubic)
+            anim.start()
+            self._sidebar_anim = anim
+        else:
+            self._sidebar_visible = True
+            anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
+            anim.setDuration(200)
+            anim.setStartValue(0)
+            anim.setEndValue(230)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.start()
+            self._sidebar_anim = anim
 
     def _toggle_log_panel(self):
         if self.log_panel.isVisible():
@@ -461,8 +488,7 @@ class MainWindow(QMainWindow):
                     title = resp.get("content", "").strip()[:60]
                     if title:
                         self.db.update_chat(_chat_id, title=title)
-                        from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
-                        QMetaObject.invokeMethod(self, "_refresh_title_in_list", _Qt.QueuedConnection, Q_ARG(int, _chat_id), Q_ARG(str, title))
+                        self._title_ready.emit(_chat_id, title)
                 except Exception:
                     pass
             threading.Thread(target=_gen_title, daemon=True).start()

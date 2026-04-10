@@ -169,6 +169,24 @@ class AppSettingsDialog(QDialog):
         saved_mode = self.db.get_setting("title_mode", "words")
         self.title_combo.setCurrentIndex(0 if saved_mode == "words" else 1)
         conn_layout.addRow("Название чата:", self.title_combo)
+
+        self.lang_combo = QComboBox()
+        langs = [
+            ("Авто (язык пользователя)", "auto"),
+            ("Русский", "ru"),
+            ("English", "en"),
+            ("Deutsch", "de"),
+            ("Français", "fr"),
+            ("Español", "es"),
+            ("中文", "zh"),
+            ("日本語", "ja"),
+        ]
+        for label, code in langs:
+            self.lang_combo.addItem(label, code)
+        saved_lang = self.db.get_setting("language", "auto")
+        idx = next((i for i, (_, c) in enumerate(langs) if c == saved_lang), 0)
+        self.lang_combo.setCurrentIndex(idx)
+        conn_layout.addRow("Язык ответов:", self.lang_combo)
         tabs.addTab(conn_widget, "Подключение")
 
         # ── Промпты ───────────────────────────────────────
@@ -347,6 +365,7 @@ class AppSettingsDialog(QDialog):
         self.db.set_setting("lm_studio_url", self.url_edit.text().strip())
         self.db.set_setting("temperature", self.temp_edit.text().strip())
         self.db.set_setting("title_mode", self.title_combo.currentData())
+        self.db.set_setting("language", self.lang_combo.currentData())
         try:
             from src.core.agent import SYSTEM_AUTO, SYSTEM_WORK, SYSTEM_TALK
             _defaults = {"auto": SYSTEM_AUTO, "work": SYSTEM_WORK, "talk": SYSTEM_TALK}
