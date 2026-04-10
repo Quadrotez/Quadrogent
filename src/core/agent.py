@@ -250,6 +250,12 @@ class Agent:
         if memories:
             base += f"\n\nLong-term memory:\n{memories}"
         return base
+
+    def _get_system_with_think(self, mode: str, think_mode: bool) -> str:
+        base = self._get_system_prompt(mode)
+        if not think_mode:
+            base += "\n\nIMPORTANT: Do NOT use <think> blocks. Respond directly without internal reasoning tags."
+        return base
     def auto_memorize(self, chat_id: int) -> bool:
         """Ask the LLM if the last exchange is worth memorising. Background-safe."""
         db_messages = self.db.get_messages(chat_id)
@@ -472,11 +478,11 @@ class Agent:
 
     # ── Main agent loop ───────────────────────────────────────────────────────
 
-    def run(self, chat_id: int, user_message: str, mode: str = "auto"):
+    def run(self, chat_id: int, user_message: str, mode: str = "auto", web_search: bool = True, think_mode: bool = True):
         self._stop = False
         self.db.add_message(chat_id, "user", user_message)
 
-        system = self._get_system_prompt(mode)
+        system = self._get_system_with_think(mode, think_mode)
         db_messages = self.db.get_messages(chat_id)
 
         messages = [{"role": "system", "content": system}]
@@ -522,6 +528,7 @@ class Agent:
                     stream=True,
                     tool_choice=tool_choice,
                     work_mode=work_mode,
+                    use_web_search=web_search,
                 ):
                     if self._stop:
                         break

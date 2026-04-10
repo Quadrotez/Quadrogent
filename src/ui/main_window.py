@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QListWidget, QListWidgetItem, QSplitter,
     QLabel, QMessageBox, QMenu, QFileDialog,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, pyqtSlot
 from PyQt5.QtGui import QDesktopServices, QPixmap
 from PyQt5.QtCore import QUrl
 
@@ -32,14 +32,17 @@ class AgentWorker(QThread):
     stream_end_signal   = pyqtSignal()
     file_ready_signal   = pyqtSignal(str, str)
     finished_signal     = pyqtSignal()
-    lm_log_signal       = pyqtSignal(str)  # NEW: LM Studio логи
+    lm_log_signal       = pyqtSignal(str)
 
-    def __init__(self, agent: Agent, chat_id: int, text: str, mode: str):
+    def __init__(self, agent: Agent, chat_id: int, text: str, mode: str,
+                 web_search: bool = True, think_mode: bool = True):
         super().__init__()
         self.agent = agent
         self.chat_id = chat_id
         self.text = text
         self.mode = mode
+        self.web_search = web_search
+        self.think_mode = think_mode
 
     def run(self):
         self.agent.on_message      = lambda r, c: self.message_signal.emit(r, c)
@@ -48,8 +51,9 @@ class AgentWorker(QThread):
         self.agent.on_stream_delta = lambda t: self.stream_delta_signal.emit(t)
         self.agent.on_stream_end   = lambda: self.stream_end_signal.emit()
         self.agent.on_file_ready   = lambda n, p: self.file_ready_signal.emit(n, p)
-        self.agent.on_lm_log       = lambda m: self.lm_log_signal.emit(m)  # NEW
-        self.agent.run(self.chat_id, self.text, self.mode)
+        self.agent.on_lm_log       = lambda m: self.lm_log_signal.emit(m)
+        self.agent.run(self.chat_id, self.text, self.mode,
+                       web_search=self.web_search, think_mode=self.think_mode)
         self.finished_signal.emit()
 
 
@@ -61,6 +65,8 @@ class MainWindow(QMainWindow):
         self.current_chat_id: int | None = None
         self._worker_chat_id: int | None = None
         self.worker: AgentWorker | None = None
+        self._pending_ai_title_chat: int | None = None
+        self._pending_ai_title_text: str = ""
 
         self.setWindowTitle("Quadrogent")
         self.setMinimumSize(960, 640)
@@ -161,12 +167,14 @@ class MainWindow(QMainWindow):
         self.chat = ChatWidget()
         self.chat.send_message.connect(self._on_send)
         self.chat.attach_file.connect(self._on_attach)
-        self.chat.save_memory.connect(self._on_save_memory)
         self.chat.stop_requested.connect(self._on_stop)
         self.chat.export_chat.connect(self._on_export_chat)
         self.chat.model_changed.connect(self._on_model_changed)
         self.chat.model_refresh.connect(self._refresh_models)
         self.chat.persistent_toggled.connect(self._on_persistent_toggled)
+        self.chat.web_search_toggled.connect(self._on_web_search_toggled)
+        self.chat.think_mode_toggled.connect(self._on_think_mode_toggled)
+        self.chat.mode_changed.connect(self._on_chat_mode_changed)
         self.chat.log_toggle_requested.connect(self._toggle_log_panel)
 
         self._main_splitter.addWidget(self.chat)
@@ -262,7 +270,11 @@ class MainWindow(QMainWindow):
         self.chat.set_chat_title(title)
         self.chat.load_messages(self.db.get_messages(chat_id))
         is_p = bool(chat_data.get("persistent", 0)) if chat_data else False
+        ws = bool(chat_data.get("web_search", 1)) if chat_data else True
+        tm = bool(chat_data.get("think_mode", 1)) if chat_data else True
+        mode = chat_data.get("mode", "auto") if chat_data else "auto"
         self.chat.set_persistent(is_p)
+        self.chat.set_chat_state(mode=mode, persistent=is_p, web_search=ws, think_mode=tm)
 
     def _chat_context_menu(self, pos):
         item = self.chat_list.itemAt(pos)
@@ -313,6 +325,19 @@ class MainWindow(QMainWindow):
             self.db.update_chat(self.current_chat_id, persistent=1 if is_persistent else 0)
             self._load_chats()
 
+    def _on_web_search_toggled(self, enabled: bool):
+        if self.current_chat_id:
+            self.db.update_chat(self.current_chat_id, web_search=1 if enabled else 0)
+
+    def _on_think_mode_toggled(self, enabled: bool):
+        if self.current_chat_id:
+            self.db.update_chat(self.current_chat_id, think_mode=1 if enabled else 0)
+
+    def _on_chat_mode_changed(self, mode: str):
+        if self.current_chat_id:
+            self.db.update_chat(self.current_chat_id, mode=mode)
+            self._load_chats()
+
     # ── Model ──────────────────────────────────────────────
 
     def _refresh_models(self):
@@ -345,7 +370,16 @@ class MainWindow(QMainWindow):
         mode = chat_data.get("mode", "auto") if chat_data else "auto"
 
         if not self.db.get_messages(self.current_chat_id):
-            title = llm_text[:50] + ("…" if len(llm_text) > 50 else "")
+            title_mode = self.db.get_setting("title_mode", "words")
+            if title_mode == "ai":
+                # Defer title generation until response arrives; use placeholder
+                words = llm_text.split()[:4]
+                title = " ".join(words) + ("…" if len(llm_text.split()) > 4 else "")
+                self._pending_ai_title_chat = self.current_chat_id
+                self._pending_ai_title_text = llm_text
+            else:
+                words = llm_text.split()[:4]
+                title = " ".join(words) + ("…" if len(llm_text.split()) > 4 else "")
             self.db.update_chat(self.current_chat_id, title=title)
             self.chat.set_chat_title(title)
             self._load_chats()
@@ -353,7 +387,10 @@ class MainWindow(QMainWindow):
         self.chat.set_busy(True)
 
         self._worker_chat_id = self.current_chat_id  # track which chat this worker belongs to
-        self.worker = AgentWorker(self.agent, self.current_chat_id, llm_text, mode)
+        web_search = bool(chat_data.get("web_search", 1)) if chat_data else True
+        think_mode = bool(chat_data.get("think_mode", 1)) if chat_data else True
+        self.worker = AgentWorker(self.agent, self.current_chat_id, llm_text, mode,
+                                  web_search=web_search, think_mode=think_mode)
         self.worker.message_signal.connect(self._on_agent_message)
         self.worker.tool_signal.connect(self._on_agent_tool)
         self.worker.stream_start_signal.connect(self._on_stream_start)
@@ -403,15 +440,38 @@ class MainWindow(QMainWindow):
     def _on_agent_done(self):
         self.chat.set_busy(False)
         self.worker = None
-        # Auto-memorize in background — non-blocking
         if self.current_chat_id is not None:
             import threading
             chat_id = self.current_chat_id
-            threading.Thread(
-                target=self.agent.auto_memorize,
-                args=(chat_id,),
-                daemon=True,
-            ).start()
+            threading.Thread(target=self.agent.auto_memorize, args=(chat_id,), daemon=True).start()
+        # AI title generation if requested
+        if self._pending_ai_title_chat is not None:
+            import threading
+            _chat_id = self._pending_ai_title_chat
+            _text = self._pending_ai_title_text
+            self._pending_ai_title_chat = None
+            self._pending_ai_title_text = ""
+            def _gen_title():
+                try:
+                    msgs = [
+                        {"role": "system", "content": "Generate a very short chat title (3-6 words) for this user message. Respond ONLY with the title, no quotes."},
+                        {"role": "user", "content": _text[:300]},
+                    ]
+                    resp = self.agent.llm.chat(msgs, use_tools=False, stream=False)
+                    title = resp.get("content", "").strip()[:60]
+                    if title:
+                        self.db.update_chat(_chat_id, title=title)
+                        from PyQt5.QtCore import QMetaObject, Q_ARG, Qt as _Qt
+                        QMetaObject.invokeMethod(self, "_refresh_title_in_list", _Qt.QueuedConnection, Q_ARG(int, _chat_id), Q_ARG(str, title))
+                except Exception:
+                    pass
+            threading.Thread(target=_gen_title, daemon=True).start()
+
+    @pyqtSlot(int, str)
+    def _refresh_title_in_list(self, chat_id: int, title: str):
+        self._load_chats()
+        if chat_id == self.current_chat_id:
+            self.chat.set_chat_title(title)
 
     def _on_stop(self):
         if self.worker:
@@ -446,14 +506,6 @@ class MainWindow(QMainWindow):
             pass
         self.chat.set_pending_file(filename, dest)
 
-    def _on_save_memory(self):
-        if not self.current_chat_id:
-            return
-        self.chat.status_label.setText("Сохранение в память…")
-        summary = self.agent.summarize_chat(self.current_chat_id)
-        self.chat.status_label.setText(
-            f"Сохранено: {summary[:60]}…" if summary else "Не удалось сохранить"
-        )
 
     # ── Export ─────────────────────────────────────────────
 

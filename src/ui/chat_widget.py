@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QTextEdit, QPushButton, QLabel, QFileDialog,
     QSizePolicy, QMenu, QComboBox,
 )
-from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QDesktopServices, QKeyEvent
 
 from src.ui.styles import MESSAGE_CSS
@@ -247,32 +247,46 @@ def _error_row(content_html: str) -> str:
     )
 
 
-_THINK_FRAMES = [
-    (
-        f'<span style="color:#999999;font-size:22px;font-family:{MONO};">·</span>'
-        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">··</span>'
-    ),
-    (
-        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">·</span>'
-        f'<span style="color:#999999;font-size:22px;font-family:{MONO};">·</span>'
-        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">·</span>'
-    ),
-    (
-        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">··</span>'
-        f'<span style="color:#999999;font-size:22px;font-family:{MONO};">·</span>'
-    ),
-]
+_BRAIN_COLORS = ["#555555", "#777777", "#999999", "#777777"]
+
+
+def _brain_avatar(frame: int = 0) -> str:
+    """Pulsing brain (cpu-chip icon) for think mode."""
+    color = _BRAIN_COLORS[frame % len(_BRAIN_COLORS)]
+    brain_dir = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "icons"
+    ))
+    icon_path = os.path.join(brain_dir, "cpu-chip.svg")
+    if os.path.exists(icon_path):
+        svg = open(icon_path).read().replace("currentColor", color)
+        # Encode as data URI for QTextBrowser
+        import base64
+        b64 = base64.b64encode(svg.encode()).decode()
+        return (
+            f'<div style="width:26px;height:26px;min-width:26px;'
+            f'background:{C["avatar_bg"]};border:1px solid {C["avatar_border"]};'
+            f'border-radius:6px;text-align:center;line-height:26px;margin-top:2px;">'
+            f'<img src="data:image/svg+xml;base64,{b64}" width="16" height="16" '
+            f'style="margin-top:5px;vertical-align:middle;"/>'
+            f'</div>'
+        )
+    return _avatar()
 
 
 def _thinking_row(frame: int = 0) -> str:
-    """Animated thinking dots — frame is cycled by a QTimer in ChatWidget."""
-    dots = _THINK_FRAMES[frame % len(_THINK_FRAMES)]
+    """Pulsing brain animation during agent thinking."""
+    color = _BRAIN_COLORS[frame % len(_BRAIN_COLORS)]
+    dots_colors = ["#222", "#333", "#444"]
+    dc = dots_colors[frame % len(dots_colors)]
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0;">'
         f'<tr>'
         f'<td width="18"></td>'
-        f'<td width="36" valign="middle">{_avatar()}</td>'
-        f'<td valign="middle" style="padding-top:2px;letter-spacing:3px;">{dots}</td>'
+        f'<td width="36" valign="middle">{_brain_avatar(frame)}</td>'
+        f'<td valign="middle" style="padding-top:2px;">'
+        f'<span style="color:{color};font-size:13px;font-family:{MONO};'
+        f'letter-spacing:2px;">думаю&#x2026;</span>'
+        f'</td>'
         f'</tr>'
         f'</table>'
     )
@@ -404,6 +418,14 @@ def _md_to_html(text: str) -> str:
                 result.append(code_blocks[idx])
             except (ValueError, IndexError):
                 result.append(part)
+            continue
+        # If the part already contains HTML tags (model output), pass through
+        _HTML_DETECT = re.compile(
+            r'<\s*/?\s*(?:code|div|span|pre|a\b|strong|em|ul|ol|li|p\b|br\b|h[1-6]\b|table|tr|td|th)',
+            re.IGNORECASE
+        )
+        if _HTML_DETECT.search(part):
+            result.append(part)
             continue
         p = html.escape(part)
         # Inline code
@@ -584,6 +606,151 @@ class ModelSelector(QWidget):
             self.model_changed.emit(model_id)
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  QuickSettingsPanel — slides up from the input area
+# ─────────────────────────────────────────────────────────────────────────────
+
+class QuickSettingsPanel(QWidget):
+    """Slide-up panel for per-chat settings."""
+    persistent_toggled = pyqtSignal(bool)
+    web_search_toggled = pyqtSignal(bool)
+    think_mode_toggled = pyqtSignal(bool)
+    mode_changed       = pyqtSignal(str)
+    attach_requested   = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("quickPanel")
+        self.setMaximumHeight(0)  # hidden by default
+        self._is_open = False
+        self._anim = None
+
+        self.setStyleSheet(
+            "#quickPanel{"
+            "background:#080808;border-top:1px solid #181818;"
+            "}"
+        )
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(14, 10, 14, 10)
+        outer.setSpacing(10)
+
+        # Row 1: Mode buttons
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        lbl1 = QLabel("Режим:")
+        lbl1.setStyleSheet("color:#404040;font-size:11px;min-width:52px;")
+        row1.addWidget(lbl1)
+        self._mode_btns = {}
+        for mode, label in (("auto", "Auto"), ("work", "Work"), ("talk", "Talk")):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedHeight(26)
+            btn.setStyleSheet(
+                "QPushButton{background:#0d0d0d;border:1px solid #1e1e1e;"
+                "border-radius:5px;color:#404040;font-size:11px;padding:0 10px;}"
+                "QPushButton:checked{background:#181818;border-color:#333;color:#c8c8c8;}"
+                "QPushButton:hover{background:#111;color:#777;}"
+            )
+            btn.clicked.connect(lambda checked, m=mode: self._on_mode(m))
+            row1.addWidget(btn)
+            self._mode_btns[mode] = btn
+        row1.addStretch()
+
+        # Row 2: Toggles
+        row2 = QHBoxLayout()
+        row2.setSpacing(14)
+
+        self._persistent_btn = self._make_toggle("Постоянный", "bookmark", False)
+        self._persistent_btn.clicked.connect(lambda c: self.persistent_toggled.emit(c))
+        row2.addWidget(self._persistent_btn)
+
+        self._web_btn = self._make_toggle("Веб-поиск", "magnifying-glass", True)
+        self._web_btn.clicked.connect(lambda c: self.web_search_toggled.emit(c))
+        row2.addWidget(self._web_btn)
+
+        self._think_btn = self._make_toggle("Think mode", "cpu-chip", True)
+        self._think_btn.clicked.connect(lambda c: self.think_mode_toggled.emit(c))
+        row2.addWidget(self._think_btn)
+
+        row2.addStretch()
+
+        # Attach file button in panel
+        attach_btn = QPushButton(" Прикрепить файл")
+        attach_btn.setStyleSheet(
+            "QPushButton{background:#0d0d0d;border:1px solid #1e1e1e;"
+            "border-radius:5px;color:#404040;font-size:11px;padding:3px 10px;}"
+            "QPushButton:hover{background:#111;border-color:#2a2a2a;color:#777;}"
+        )
+        attach_btn.setFixedHeight(26)
+        apply_icon(attach_btn, "paper-clip", "#404040", 12)
+        attach_btn.clicked.connect(self.attach_requested.emit)
+        row2.addWidget(attach_btn)
+
+        outer.addLayout(row1)
+        outer.addLayout(row2)
+
+    def _make_toggle(self, label: str, icon_name: str, default: bool) -> QPushButton:
+        btn = QPushButton(f" {label}")
+        btn.setCheckable(True)
+        btn.setChecked(default)
+        btn.setFixedHeight(26)
+        apply_icon(btn, icon_name, "#404040", 12)
+        btn.setStyleSheet(
+            "QPushButton{background:#0d0d0d;border:1px solid #1e1e1e;"
+            "border-radius:5px;color:#404040;font-size:11px;padding:0 10px;}"
+            "QPushButton:checked{background:#111818;border-color:#1e3020;color:#5a9a6a;}"
+            "QPushButton:checked:hover{background:#121a14;}"
+            "QPushButton:hover{background:#111;color:#777;}"
+        )
+        return btn
+
+    def _on_mode(self, mode: str):
+        for m, btn in self._mode_btns.items():
+            btn.setChecked(m == mode)
+        self.mode_changed.emit(mode)
+
+    def set_state(self, mode: str, persistent: bool, web_search: bool, think_mode: bool):
+        for m, btn in self._mode_btns.items():
+            btn.setChecked(m == mode)
+        self._persistent_btn.setChecked(persistent)
+        self._web_btn.setChecked(web_search)
+        self._think_btn.setChecked(think_mode)
+
+    def toggle(self):
+        if self._is_open:
+            self.slide_out()
+        else:
+            self.slide_in()
+
+    def slide_in(self):
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        self._is_open = True
+        self.setMaximumHeight(0)
+        self.show()
+        anim = QPropertyAnimation(self, b"maximumHeight")
+        anim.setDuration(180)
+        anim.setStartValue(0)
+        anim.setEndValue(100)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.start()
+        self._anim = anim  # keep reference
+
+    def slide_out(self):
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        self._is_open = False
+        anim = QPropertyAnimation(self, b"maximumHeight")
+        anim.setDuration(150)
+        anim.setStartValue(self.height())
+        anim.setEndValue(0)
+        anim.setEasingCurve(QEasingCurve.InCubic)
+        anim.finished.connect(lambda: self.hide() if not self._is_open else None)
+        anim.start()
+        self._anim = anim
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  ChatWidget
 # ─────────────────────────────────────────────────────────────────────────────
@@ -591,12 +758,14 @@ class ModelSelector(QWidget):
 class ChatWidget(QWidget):
     send_message         = pyqtSignal(str)
     attach_file          = pyqtSignal(str)
-    save_memory          = pyqtSignal()
     stop_requested       = pyqtSignal()
     export_chat          = pyqtSignal(str)
     model_changed        = pyqtSignal(str)
     model_refresh        = pyqtSignal()
     persistent_toggled   = pyqtSignal(bool)
+    web_search_toggled   = pyqtSignal(bool)
+    think_mode_toggled   = pyqtSignal(bool)
+    mode_changed         = pyqtSignal(str)
     log_toggle_requested = pyqtSignal()
 
     _STREAM_INTERVAL_MS = 40
@@ -624,6 +793,7 @@ class ChatWidget(QWidget):
         self._think_timer = QTimer(self)
         self._think_timer.setInterval(350)
         self._think_timer.timeout.connect(self._tick_think)
+        self._panel: "QuickSettingsPanel | None" = None  # created in _build
 
         self.setAcceptDrops(True)
         self._build()
@@ -743,16 +913,26 @@ class ChatWidget(QWidget):
         self._chip_row.setContentsMargins(0, 0, 0, 0)
         il.addLayout(self._chip_row)
 
+        # Quick settings panel (slides up from input area)
+        self._panel = QuickSettingsPanel()
+        self._panel.persistent_toggled.connect(self.persistent_toggled.emit)
+        self._panel.web_search_toggled.connect(self.web_search_toggled.emit)
+        self._panel.think_mode_toggled.connect(self.think_mode_toggled.emit)
+        self._panel.mode_changed.connect(self.mode_changed.emit)
+        self._panel.attach_requested.connect(self._on_attach)
+        il.addWidget(self._panel)
+
         # Input row
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
-        self.attach_btn = QPushButton("+")
+        self.attach_btn = QPushButton()
         self.attach_btn.setObjectName("attachBtn")
         self.attach_btn.setFixedSize(44, 44)
-        self.attach_btn.setToolTip("Прикрепить файл")
-        self.attach_btn.clicked.connect(self._on_attach)
+        self.attach_btn.setToolTip("Настройки чата")
+        self.attach_btn.clicked.connect(self._toggle_panel)
+        apply_icon(self.attach_btn, "plus", "#323232", 17)
         row.addWidget(self.attach_btn)
 
         self.input = MessageInput()
@@ -765,19 +945,17 @@ class ChatWidget(QWidget):
         self.input.textChanged.connect(self._adjust_height)
         row.addWidget(self.input, 1)
 
-        self.send_btn = QPushButton("↑")
+        self.send_btn = QPushButton()
         self.send_btn.setObjectName("sendBtn")
         self.send_btn.setFixedSize(44, 44)
         self.send_btn.setToolTip("Отправить (Enter)")
         self.send_btn.clicked.connect(self._on_send)
+        apply_icon(self.send_btn, "paper-airplane", "#060606", 18)
         row.addWidget(self.send_btn)
 
         il.addLayout(row)
 
-        self.memory_btn = QPushButton("Сохранить в память")
-        self.memory_btn.setVisible(False)
-        self.memory_btn.clicked.connect(self.save_memory.emit)
-        il.addWidget(self.memory_btn)
+
 
         layout.addWidget(self._input_container)
 
@@ -788,7 +966,6 @@ class ChatWidget(QWidget):
     def _set_persistent_ui(self, is_persistent: bool):
         self._is_persistent = is_persistent
         self._update_mode_buttons(is_persistent)
-        self.memory_btn.setVisible(is_persistent)
         self.persistent_toggled.emit(is_persistent)
 
     def _update_mode_buttons(self, is_persistent: bool):
@@ -802,6 +979,17 @@ class ChatWidget(QWidget):
         self._log_btn.setProperty("active", "true" if active else "false")
         self._log_btn.style().unpolish(self._log_btn)
         self._log_btn.style().polish(self._log_btn)
+
+    # ── Panel ────────────────────────────────────────────
+
+    def _toggle_panel(self):
+        if self._panel is not None:
+            self._panel.toggle()
+
+    def set_chat_state(self, mode: str, persistent: bool, web_search: bool, think_mode: bool):
+        """Called when switching chats — syncs the panel state."""
+        if self._panel is not None:
+            self._panel.set_state(mode, persistent, web_search, think_mode)
 
     # ── Drag & Drop ───────────────────────────────────────
 
@@ -971,7 +1159,6 @@ class ChatWidget(QWidget):
     def set_persistent(self, is_persistent: bool):
         self._is_persistent = is_persistent
         self._update_mode_buttons(is_persistent)
-        self.memory_btn.setVisible(is_persistent)
 
     # ── Message display ───────────────────────────────────
 
@@ -1043,17 +1230,45 @@ class ChatWidget(QWidget):
     def append_stream(self, chunk: str):
         self._stream_buffer += chunk
 
+    @staticmethod
+    def _split_think(text: str):
+        """Return (think_content, visible_content) from raw streaming text."""
+        import re as _re
+        think_parts = _re.findall(r'<think>(.*?)</think>', text, _re.DOTALL)
+        visible = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL)
+        # If think block is not yet closed, strip the open tag and everything after
+        if '<think>' in visible:
+            visible = visible[:visible.index('<think>')]
+        return "\n".join(think_parts), visible.strip()
+
     def _flush_stream(self):
         if not self._stream_buffer:
             return
         self._streaming_text += self._stream_buffer
         self._stream_buffer   = ""
-        escaped = html.escape(self._streaming_text).replace("\n", "<br>")
+        think_content, visible = self._split_think(self._streaming_text)
+        # Build display HTML
+        if visible:
+            escaped = html.escape(visible).replace("\n", "<br>")
+        else:
+            escaped = ""
         cursor_span = (
             f'<span style="display:inline-block;width:2px;height:14px;'
             f'background:{C["cursor"]};margin-left:2px;vertical-align:text-bottom;">|</span>'
         )
-        block = _asst_bubble(escaped + cursor_span)
+        think_html = ""
+        if think_content:
+            tc_esc = html.escape(think_content[:800]).replace("\n", "<br>")
+            think_html = (
+                f'<div style="border-left:2px solid #1a1a1a;padding:4px 10px;'
+                f'color:#333;font-size:11px;font-family:{MONO};'
+                f'background:#080808;margin-bottom:6px;'
+                f'border-radius:0 4px 4px 0;max-height:120px;overflow:hidden;">'
+                f'<span style="color:#252525;font-size:9.5px;letter-spacing:0.8px;'
+                f'text-transform:uppercase;display:block;margin-bottom:3px;">думает&#x2026;</span>'
+                f'{tc_esc}</div>'
+            )
+        block = _asst_bubble(think_html + escaped + cursor_span)
         self.browser.setHtml(MESSAGE_CSS + f"<body>{self._streaming_base}{block}</body>")
         self._scroll_bottom()
 
@@ -1063,10 +1278,31 @@ class ChatWidget(QWidget):
             self._streaming_text += self._stream_buffer
             self._stream_buffer   = ""
         if self._streaming_text:
-            rendered = _md_to_html(self._streaming_text)
-            self._messages_html = self._streaming_base + _asst_bubble(rendered)
+            import re as _re
+            think_parts = _re.findall(r'<think>(.*?)</think>', self._streaming_text, _re.DOTALL)
+            visible = _re.sub(r'<think>.*?</think>', '', self._streaming_text, flags=_re.DOTALL).strip()
+            if '<think>' in visible:
+                visible = visible[:visible.index('<think>')].strip()
+            # Build collapsible think block
+            think_html = ""
+            if think_parts:
+                tc = "\n---\n".join(think_parts)
+                tc_esc = html.escape(tc).replace("\n", "<br>")
+                n = len(self._raw_messages)
+                think_html = (
+                    f'<div style="border-left:2px solid #161616;margin-bottom:8px;'
+                    f'padding:4px 10px;border-radius:0 4px 4px 0;background:#070707;">'
+                    f'<a href="think://{n}" style="color:#2a2a2a;font-size:9.5px;'
+                    f'font-family:{MONO};text-transform:uppercase;letter-spacing:0.8px;'
+                    f'text-decoration:none;">&#129504; думал — нажми чтобы развернуть</a>'
+                    f'<div id="think-{n}" style="display:none;color:#333;font-size:11px;'
+                    f'font-family:{MONO};margin-top:4px;">{tc_esc}</div>'
+                    f'</div>'
+                )
+            rendered = _md_to_html(visible) if visible else ""
+            self._messages_html = self._streaming_base + _asst_bubble(think_html + rendered)
             self._raw_messages.append({
-                "role": "assistant", "content": self._streaming_text,
+                "role": "assistant", "content": visible,
                 "ts": datetime.now().isoformat(),
             })
             self._render()

@@ -84,6 +84,16 @@ class Database:
                 FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
             );
         """)
+        # Migrations for new columns (idempotent)
+        for migration in [
+            "ALTER TABLE chats ADD COLUMN web_search INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE chats ADD COLUMN think_mode INTEGER NOT NULL DEFAULT 1",
+        ]:
+            try:
+                self.conn.execute(migration)
+                self.conn.commit()
+            except Exception:
+                pass  # Column already exists
 
     # ── Settings ──────────────────────────────────────────
 
@@ -101,11 +111,11 @@ class Database:
 
     # ── Chats ─────────────────────────────────────────────
 
-    def create_chat(self, title: str = "Новый чат", mode: str = "auto", persistent: int = 0) -> int:
+    def create_chat(self, title: str = "Новый чат", mode: str = "auto", persistent: int = 0, web_search: int = 1, think_mode: int = 1) -> int:
         now = datetime.now().isoformat()
         cur = self._execute_commit(
-            "INSERT INTO chats (title, mode, persistent, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (title, mode, persistent, now, now),
+            "INSERT INTO chats (title, mode, persistent, web_search, think_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (title, mode, persistent, web_search, think_mode, now, now),
         )
         return cur.lastrowid
 
@@ -122,7 +132,7 @@ class Database:
         return dict(row) if row else None
 
     def update_chat(self, chat_id: int, **kwargs):
-        allowed = {"title", "mode", "persistent"}
+        allowed = {"title", "mode", "persistent", "web_search", "think_mode"}
         fields = {k: v for k, v in kwargs.items() if k in allowed}
         if not fields:
             return

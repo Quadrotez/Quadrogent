@@ -162,6 +162,13 @@ class AppSettingsDialog(QDialog):
         conn_layout.addRow("LM Studio URL:", self.url_edit)
         self.temp_edit = QLineEdit(self.db.get_setting("temperature", "0.7"))
         conn_layout.addRow("Temperature:", self.temp_edit)
+
+        self.title_combo = QComboBox()
+        self.title_combo.addItem("Первые 4 слова (быстро)", "words")
+        self.title_combo.addItem("Генерация через AI", "ai")
+        saved_mode = self.db.get_setting("title_mode", "words")
+        self.title_combo.setCurrentIndex(0 if saved_mode == "words" else 1)
+        conn_layout.addRow("Название чата:", self.title_combo)
         tabs.addTab(conn_widget, "Подключение")
 
         # ── Промпты ───────────────────────────────────────
@@ -339,6 +346,7 @@ class AppSettingsDialog(QDialog):
     def _save(self):
         self.db.set_setting("lm_studio_url", self.url_edit.text().strip())
         self.db.set_setting("temperature", self.temp_edit.text().strip())
+        self.db.set_setting("title_mode", self.title_combo.currentData())
         try:
             from src.core.agent import SYSTEM_AUTO, SYSTEM_WORK, SYSTEM_TALK
             _defaults = {"auto": SYSTEM_AUTO, "work": SYSTEM_WORK, "talk": SYSTEM_TALK}

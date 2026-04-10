@@ -226,6 +226,7 @@ class LLMClient:
         temperature: float = 0.3,
         tool_choice: str = "auto",
         work_mode: bool = False,   # selects WORK_TOOLS vs AUTO_TOOLS
+        use_web_search: bool = True,
     ) -> dict | Generator:
         payload: dict = {
             "messages": messages,
@@ -235,7 +236,15 @@ class LLMClient:
         if self.model:
             payload["model"] = self.model
         if use_tools:
-            payload["tools"] = WORK_TOOLS if work_mode else AUTO_TOOLS
+            if work_mode:
+                payload["tools"] = WORK_TOOLS
+            else:
+                # Filter out web_search if disabled
+                tools = AUTO_TOOLS if use_web_search else [
+                    t for t in AUTO_TOOLS
+                    if t.get("function", {}).get("name") != "web_search"
+                ]
+                payload["tools"] = tools
             payload["tool_choice"] = tool_choice
 
         return self._stream(payload) if stream else self._complete(payload)
