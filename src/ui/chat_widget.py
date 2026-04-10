@@ -22,6 +22,8 @@ from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices, QKeyEvent
 
 from src.ui.styles import MESSAGE_CSS
+from src.ui.icon_helper import apply_icon, get_icon
+from PyQt5.QtCore import QSize as _QSize
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -528,7 +530,7 @@ class ModelSelector(QWidget):
         self.combo.setMinimumWidth(200)
         self.combo.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self.combo)
-        self.refresh_btn = QPushButton("↻")
+        self.refresh_btn = QPushButton()
         self.refresh_btn.setObjectName("modelRefreshBtn")
         self.refresh_btn.setFixedSize(26, 26)
         self.refresh_btn.setToolTip("Обновить модели")
@@ -651,14 +653,16 @@ class ChatWidget(QWidget):
         chat_lbl.setStyleSheet("color:#2e2e2e;font-size:11px;background:transparent;")
         tl.addWidget(chat_lbl)
 
-        self._btn_persistent = QPushButton("◉ Постоянный")
+        self._btn_persistent = QPushButton(" Постоянный")
         self._btn_persistent.setObjectName("chatModePersistent")
+        apply_icon(self._btn_persistent, "bookmark", "#353535", 12)
         self._btn_persistent.setFixedHeight(26)
         self._btn_persistent.clicked.connect(lambda: self._set_persistent_ui(True))
         tl.addWidget(self._btn_persistent)
 
-        self._btn_temp = QPushButton("○ Временный")
+        self._btn_temp = QPushButton(" Временный")
         self._btn_temp.setObjectName("chatModeTemp")
+        apply_icon(self._btn_temp, "clock", "#353535", 12)
         self._btn_temp.setFixedHeight(26)
         self._btn_temp.clicked.connect(lambda: self._set_persistent_ui(False))
         tl.addWidget(self._btn_temp)
@@ -671,8 +675,9 @@ class ChatWidget(QWidget):
         self._export_btn.clicked.connect(self._show_export_menu)
         tl.addWidget(self._export_btn)
 
-        self._log_btn = QPushButton("◫ Логи")
+        self._log_btn = QPushButton("Логи")
         self._log_btn.setObjectName("logToggleTopBtn")
+        apply_icon(self._log_btn, "bars-3", "#2a2a2a", 13)
         self._log_btn.setFixedHeight(26)
         self._log_btn.setToolTip("Показать/скрыть панель логов")
         self._log_btn.clicked.connect(self.log_toggle_requested.emit)

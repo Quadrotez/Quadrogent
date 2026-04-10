@@ -1,4 +1,5 @@
 import os
+import sys
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -171,13 +172,24 @@ class AppSettingsDialog(QDialog):
         hint = QLabel("Пустое поле = системный промпт по умолчанию.")
         hint.setStyleSheet("color:#404040;font-size:11px;")
         prompt_layout.addWidget(hint)
+        # Import default prompts lazily to avoid circular import
+        try:
+            _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _here not in sys.path:
+                sys.path.insert(0, _here)
+            from src.core.agent import SYSTEM_AUTO, SYSTEM_WORK, SYSTEM_TALK
+            _defaults = {"auto": SYSTEM_AUTO, "work": SYSTEM_WORK, "talk": SYSTEM_TALK}
+        except Exception:
+            _defaults = {"auto": "", "work": "", "talk": ""}
+
         for mode, label in (("auto", "Auto"), ("work", "Work"), ("talk", "Talk")):
             lbl = QLabel(f"Режим {label}:")
             lbl.setStyleSheet("color:#555;font-size:11px;margin-top:6px;")
             prompt_layout.addWidget(lbl)
             ed = QTextEdit()
-            ed.setPlaceholderText(f"Системный промпт для {label}…")
-            ed.setPlainText(self.db.get_setting(f"system_prompt_{mode}", ""))
+            saved = self.db.get_setting(f"system_prompt_{mode}", "")
+            # Show saved value, or fall back to the compiled-in default
+            ed.setPlainText(saved if saved.strip() else _defaults.get(mode, ""))
             ed.setFixedHeight(88)
             setattr(self, f"_prompt_{mode}", ed)
             prompt_layout.addWidget(ed)
@@ -327,7 +339,15 @@ class AppSettingsDialog(QDialog):
     def _save(self):
         self.db.set_setting("lm_studio_url", self.url_edit.text().strip())
         self.db.set_setting("temperature", self.temp_edit.text().strip())
+        try:
+            from src.core.agent import SYSTEM_AUTO, SYSTEM_WORK, SYSTEM_TALK
+            _defaults = {"auto": SYSTEM_AUTO, "work": SYSTEM_WORK, "talk": SYSTEM_TALK}
+        except Exception:
+            _defaults = {}
         for mode in ("auto", "work", "talk"):
             text = getattr(self, f"_prompt_{mode}").toPlainText().strip()
+            # If user left it as the default, store empty (= use compiled default)
+            if text == _defaults.get(mode, "").strip():
+                text = ""
             self.db.set_setting(f"system_prompt_{mode}", text)
         self.accept()

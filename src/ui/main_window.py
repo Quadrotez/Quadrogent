@@ -19,6 +19,8 @@ from src.ui.chat_widget import ChatWidget
 from src.ui.settings_dialog import ChatSettingsDialog, AppSettingsDialog
 from src.ui.styles import DARK_THEME
 from src.ui.chat_widget import set_user_avatar
+from src.ui.icon_helper import apply_icon, get_icon
+from PyQt5.QtCore import QSize
 from src.ui.right_log_panel import RightLogPanel
 
 
@@ -57,6 +59,7 @@ class MainWindow(QMainWindow):
         self.db = db
         self.agent = Agent(db)
         self.current_chat_id: int | None = None
+        self._worker_chat_id: int | None = None
         self.worker: AgentWorker | None = None
 
         self.setWindowTitle("Quadrogent")
@@ -66,6 +69,9 @@ class MainWindow(QMainWindow):
 
         self._build()
         self._load_chats()
+        # Auto-select first chat so current_chat_id is always set at startup
+        if self.chat_list.count() > 0:
+            self.chat_list.setCurrentRow(0)
         self._refresh_models()
 
         if not self.agent.llm.check_connection():
@@ -122,9 +128,10 @@ class MainWindow(QMainWindow):
         logo_layout.addStretch()
         sb.addWidget(logo_widget)
 
-        new_btn = QPushButton("＋  Новый чат")
+        new_btn = QPushButton(" Новый чат")
         new_btn.setObjectName("newChatBtn")
         new_btn.clicked.connect(self._new_chat)
+        apply_icon(new_btn, "plus", "#d8d8d8", 13)
         sb.addWidget(new_btn)
 
         self.chat_list = QListWidget()
@@ -135,15 +142,17 @@ class MainWindow(QMainWindow):
         sb.addWidget(self.chat_list, 1)
 
         # ── Clear buttons ─────────────────────────────────
-        clear_ws_btn = QPushButton("🗑  Очистить workspace")
+        clear_ws_btn = QPushButton(" Очистить workspace")
         clear_ws_btn.setObjectName("clearBtn")
         clear_ws_btn.setToolTip("Удалить все файлы в workspace/")
         clear_ws_btn.clicked.connect(self._clear_workspace)
+        apply_icon(clear_ws_btn, "trash", "#cc3333", 13)
         sb.addWidget(clear_ws_btn)
 
-        settings_btn = QPushButton("⚙  Настройки")
+        settings_btn = QPushButton(" Настройки")
         settings_btn.setObjectName("settingsBtn")
         settings_btn.clicked.connect(self._open_settings)
+        apply_icon(settings_btn, "cog-6-tooth", "#363636", 13)
         sb.addWidget(settings_btn)
 
         self._main_splitter.addWidget(sidebar)
@@ -343,6 +352,7 @@ class MainWindow(QMainWindow):
 
         self.chat.set_busy(True)
 
+        self._worker_chat_id = self.current_chat_id  # track which chat this worker belongs to
         self.worker = AgentWorker(self.agent, self.current_chat_id, llm_text, mode)
         self.worker.message_signal.connect(self._on_agent_message)
         self.worker.tool_signal.connect(self._on_agent_tool)
@@ -355,13 +365,16 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_agent_message(self, role: str, content: str):
+        if self.current_chat_id != self._worker_chat_id:
+            return
         if role == "assistant":
             self.chat.add_assistant_message(content)
         elif role == "error":
             self.chat.add_error_message(content)
 
     def _on_agent_tool(self, name: str, args: str, result: str):
-        self.chat.add_tool_message(name, args, result)
+        if self.current_chat_id == self._worker_chat_id:
+            self.chat.add_tool_message(name, args, result)
         # Mirror every tool call to the LM Studio log panel
         # so the right-side logs are never empty during a work session.
         short_args   = args[:120] + ("…" if len(args) > 120 else "")
@@ -370,13 +383,17 @@ class MainWindow(QMainWindow):
         self.log_panel.append_lm_log(f"  {short_result}")
 
     def _on_stream_start(self):
-        self.chat.begin_stream()
+        if self.current_chat_id == self._worker_chat_id:
+            self.chat.begin_stream()
         self.log_panel.append_lm_log("── thinking ──────────────────────")
 
-    def _on_stream_delta(self, c): self.chat.append_stream(c)
+    def _on_stream_delta(self, c):
+        if self.current_chat_id == self._worker_chat_id:
+            self.chat.append_stream(c)
 
     def _on_stream_end(self):
-        self.chat.end_stream()
+        if self.current_chat_id == self._worker_chat_id:
+            self.chat.end_stream()
         self.log_panel.append_lm_log("── done ───────────────────────────")
 
     def _on_lm_log(self, message: str):
@@ -401,7 +418,8 @@ class MainWindow(QMainWindow):
             self.agent.stop()
 
     def _on_file_ready(self, filename: str, abs_path: str):
-        self.chat.add_file_card(filename, abs_path)
+        if self.current_chat_id == self._worker_chat_id:
+            self.chat.add_file_card(filename, abs_path)
         chat_id = self.current_chat_id
         if chat_id is not None:
             try:
