@@ -18,6 +18,7 @@ from src.core.agent import Agent
 from src.ui.chat_widget import ChatWidget
 from src.ui.settings_dialog import ChatSettingsDialog, AppSettingsDialog
 from src.ui.styles import DARK_THEME
+from src.ui.chat_widget import set_user_avatar
 from src.ui.right_log_panel import RightLogPanel
 
 
@@ -71,6 +72,7 @@ class MainWindow(QMainWindow):
             self.chat.status_label.setText("⚠ LM Studio не найден (localhost:1234)")
 
         self._init_docker_async()
+        self._apply_user_avatar()
 
     # ── Layout ──────────────────────────────────────────────
 
@@ -188,6 +190,15 @@ class MainWindow(QMainWindow):
         self.log_panel.hide()
         self.chat.set_log_btn_active(False)
 
+    def _apply_user_avatar(self):
+        import os
+        default = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "images", "user.png"
+        ))
+        path = self.db.get_setting("user_avatar", default)
+        set_user_avatar(path)
+
     # ── Docker init ────────────────────────────────────────
 
     def _init_docker_async(self):
@@ -271,7 +282,9 @@ class MainWindow(QMainWindow):
             self.db.update_chat(chat_id, **dlg.result_data)
             self._load_chats()
             if chat_id == self.current_chat_id:
-                self.chat.set_persistent(bool(dlg.result_data.get("persistent", 0)))
+                chat_d = self.db.get_chat(chat_id)
+                if chat_d:
+                    self.chat.set_persistent(bool(chat_d.get("persistent", 0)))
 
     def _delete_chat(self, chat_id: int):
         reply = QMessageBox.question(
@@ -373,6 +386,15 @@ class MainWindow(QMainWindow):
     def _on_agent_done(self):
         self.chat.set_busy(False)
         self.worker = None
+        # Auto-memorize in background — non-blocking
+        if self.current_chat_id is not None:
+            import threading
+            chat_id = self.current_chat_id
+            threading.Thread(
+                target=self.agent.auto_memorize,
+                args=(chat_id,),
+                daemon=True,
+            ).start()
 
     def _on_stop(self):
         if self.worker:
@@ -692,15 +714,26 @@ a{{color:#6a9fd8;text-decoration:none}}
         if reply != QMessageBox.Yes:
             return
         try:
+            # Clear via Docker exec — avoids host read-only mount issues
+            ec, out = self.agent.docker.execute(
+                "find /workspace -mindepth 1 -not -name '.gitkeep' -exec rm -rf {} + 2>/dev/null; "                "echo DONE"
+            )
+            if ec != 0:
+                QMessageBox.warning(self, "Ошибка Docker", out[:300])
+                return
+            # Also clean host-side workspace dir
             base = os.path.abspath(self.agent.files.base_dir)
             deleted = 0
             for entry in os.listdir(base):
-                if entry == '.gitkeep':  # Пропустить .gitkeep
+                if entry == '.gitkeep':
                     continue
                 ep = os.path.join(base, entry)
-                shutil.rmtree(ep) if os.path.isdir(ep) else os.remove(ep)
-                deleted += 1
-            QMessageBox.information(self, "Готово", f"Удалено элементов: {deleted}.")
+                try:
+                    shutil.rmtree(ep) if os.path.isdir(ep) else os.remove(ep)
+                    deleted += 1
+                except OSError:
+                    deleted += 1  # Docker already removed it
+            QMessageBox.information(self, "Готово", f"Workspace очищен ({deleted} эл.).")
         except Exception as e:
             QMessageBox.warning(self, "Ошибка", str(e))
 
@@ -708,6 +741,7 @@ a{{color:#6a9fd8;text-decoration:none}}
 
     def _open_settings(self):
         dlg = AppSettingsDialog(self.db, self)
+        dlg.avatar_changed.connect(set_user_avatar)
         if dlg.exec_():
             url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
             self.agent.llm.base_url = url

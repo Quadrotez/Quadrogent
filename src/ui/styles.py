@@ -35,7 +35,7 @@ QWidget {
 #chatList { background-color: #070707; border: none; outline: none; }
 #chatList::item {
     padding: 9px 12px; border-radius: 6px;
-    color: #484848; margin: 1px 6px; font-size: 12px;
+    color: #c0c0c0; margin: 1px 6px; font-size: 12px;
     border-left: 2px solid transparent;
 }
 #chatList::item:selected {
@@ -51,12 +51,12 @@ QWidget {
 }
 #settingsBtn:hover { background-color: #0d0d0d; color: #777777; }
 #clearBtn {
-    background-color: transparent; color: #3a2020;
+    background-color: transparent; color: #cc3333;
     border: none; border-top: 1px solid #111111;
     font-size: 11px; padding: 9px 16px; margin: 0;
     border-radius: 0; text-align: left;
 }
-#clearBtn:hover { background-color: #130a0a; color: #884444; }
+#clearBtn:hover { background-color: #180808; color: #ee5555; }
 
 /* ── Top bar ─────────────────────────── */
 #chatTopBar {

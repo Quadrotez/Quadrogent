@@ -197,6 +197,14 @@ class Database:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def delete_memory(self, memory_id: int):
+        self._execute_commit("DELETE FROM memories WHERE id = ?", (memory_id,))
+
+    def update_memory(self, memory_id: int, summary: str):
+        self._execute_commit(
+            "UPDATE memories SET summary = ? WHERE id = ?", (summary, memory_id)
+        )
+
     def get_memories_text(self) -> str:
         memories = self.get_all_memories()
         if not memories:

@@ -243,12 +243,45 @@ class Agent:
 
     def _get_system_prompt(self, mode: str) -> str:
         memories = self.db.get_memories_text()
-        base = {"work": SYSTEM_WORK, "talk": SYSTEM_TALK, "auto": SYSTEM_AUTO}.get(
+        custom = self.db.get_setting(f"system_prompt_{mode}", "")
+        base = custom if custom.strip() else {"work": SYSTEM_WORK, "talk": SYSTEM_TALK, "auto": SYSTEM_AUTO}.get(
             mode, SYSTEM_AUTO
         )
         if memories:
             base += f"\n\nLong-term memory:\n{memories}"
         return base
+    def auto_memorize(self, chat_id: int) -> bool:
+        """Ask the LLM if the last exchange is worth memorising. Background-safe."""
+        db_messages = self.db.get_messages(chat_id)
+        recent = [m for m in db_messages if m["role"] in ("user", "assistant")][-6:]
+        if not recent:
+            return False
+        conversation = "\n".join(
+            f"{m['role'].upper()}: {m['content'][:400]}" for m in recent
+        )
+        eval_messages2 = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a memory evaluator. Decide if there is NEW important information "
+                    "worth saving to long-term memory (user facts, preferences, goals, setup). "
+                    'Respond ONLY with JSON: {"save": true, "summary": "one sentence"} '
+                    'or {"save": false}. No markdown.'
+                ),
+            },
+            {"role": "user", "content": conversation},
+        ]
+        try:
+            response = self.llm.chat(eval_messages2, use_tools=False, stream=False)
+            raw = response.get("content", "").strip()
+            raw = re.sub(r"```[a-z]*|```", "", raw).strip()
+            data = json.loads(raw)
+            if data.get("save") and data.get("summary", "").strip():
+                self.db.save_memory(chat_id, data["summary"].strip())
+                return True
+        except Exception:
+            pass
+        return False
 
     def _workspace_snapshot(self) -> str:
         """Get current state of /workspace for context injection."""

@@ -77,8 +77,38 @@ C = {
 FONT = '"Inter","Segoe UI",system-ui,sans-serif'
 MONO = '"JetBrains Mono","Consolas",monospace'
 
+# User avatar path — set at runtime by MainWindow
+_USER_AVATAR_PATH: str = ""
+
+def set_user_avatar(path: str):
+    global _USER_AVATAR_PATH
+    _USER_AVATAR_PATH = path
+
+
+_LOGO_PATH: str = ""
+
+
+def _init_logo_path():
+    global _LOGO_PATH
+    here = os.path.dirname(os.path.abspath(__file__))
+    p = os.path.normpath(os.path.join(here, "..", "..", "images", "logo.png"))
+    if os.path.exists(p):
+        _LOGO_PATH = p
+
+
+_init_logo_path()
+
 
 def _avatar():
+    if _LOGO_PATH:
+        url = "file:///" + _LOGO_PATH.replace("\\", "/").lstrip("/")
+        return (
+            f'<div style="width:26px;height:26px;min-width:26px;'
+            f'border-radius:6px;overflow:hidden;margin-top:2px;">'
+            f'<img src="{url}" width="26" height="26" '
+            f'style="border-radius:6px;object-fit:cover;display:block;"/>'
+            f'</div>'
+        )
     return (
         f'<div style="width:26px;height:26px;min-width:26px;'
         f'background:{C["avatar_bg"]};border:1px solid {C["avatar_border"]};'
@@ -88,14 +118,35 @@ def _avatar():
     )
 
 
+def _user_avatar_html() -> str:
+    """User avatar: image if path set, else generic icon."""
+    if _USER_AVATAR_PATH and os.path.exists(_USER_AVATAR_PATH):
+        import urllib.request as _ur
+        url = "file:///" + _USER_AVATAR_PATH.replace("\\", "/").lstrip("/")
+        return (
+            f'<div style="width:26px;height:26px;min-width:26px;'
+            f'border-radius:6px;overflow:hidden;margin-top:2px;">'
+            f'<img src="{url}" width="26" height="26" '
+            f'style="border-radius:6px;object-fit:cover;"/>'
+            f'</div>'
+        )
+    return (
+        f'<div style="width:26px;height:26px;min-width:26px;'
+        f'background:{C["avatar_bg"]};border:1px solid {C["avatar_border"]};'
+        f'border-radius:6px;text-align:center;font-family:{MONO};'
+        f'font-size:11px;color:{C["avatar_text"]};line-height:26px;'
+        f'margin-top:2px;">👤</div>'
+    )
+
+
 def _user_bubble(content_html: str) -> str:
-    """Right-aligned user bubble via table."""
+    """Right-aligned user bubble with avatar via table."""
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" '
         f'style="margin:3px 0;">'
         f'<tr>'
         f'<td width="25%"></td>'
-        f'<td align="right" valign="top">'
+        f'<td align="right" valign="top" style="padding-top:2px;">'
         f'<div style="display:inline-block;background:{C["user_bg"]};'
         f'border:1px solid {C["user_border"]};'
         f'border-radius:16px 16px 3px 16px;'
@@ -104,7 +155,8 @@ def _user_bubble(content_html: str) -> str:
         f'word-wrap:break-word;max-width:100%;">'
         f'{content_html}</div>'
         f'</td>'
-        f'<td width="18"></td>'
+        f'<td width="8" valign="top" style="padding-top:2px;">{_user_avatar_html()}</td>'
+        f'<td width="10"></td>'
         f'</tr>'
         f'</table>'
     )
@@ -193,22 +245,32 @@ def _error_row(content_html: str) -> str:
     )
 
 
-def _thinking_row() -> str:
-    """Animated thinking dots (Qt CSS animations won't work, use static dots)."""
-    dot_s = (
-        f'<span style="display:inline-block;width:6px;height:6px;'
-        f'border-radius:50%;background:{C["dot1"]};margin:0 2px;">'
-        f'·</span>'
-    )
+_THINK_FRAMES = [
+    (
+        f'<span style="color:#999999;font-size:22px;font-family:{MONO};">·</span>'
+        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">··</span>'
+    ),
+    (
+        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">·</span>'
+        f'<span style="color:#999999;font-size:22px;font-family:{MONO};">·</span>'
+        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">·</span>'
+    ),
+    (
+        f'<span style="color:#404040;font-size:22px;font-family:{MONO};">··</span>'
+        f'<span style="color:#999999;font-size:22px;font-family:{MONO};">·</span>'
+    ),
+]
+
+
+def _thinking_row(frame: int = 0) -> str:
+    """Animated thinking dots — frame is cycled by a QTimer in ChatWidget."""
+    dots = _THINK_FRAMES[frame % len(_THINK_FRAMES)]
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0;">'
         f'<tr>'
         f'<td width="18"></td>'
         f'<td width="36" valign="middle">{_avatar()}</td>'
-        f'<td valign="middle" style="padding-top:2px;">'
-        f'<span style="color:{C["dot1"]};font-size:22px;letter-spacing:2px;'
-        f'font-family:{MONO};">···</span>'
-        f'</td>'
+        f'<td valign="middle" style="padding-top:2px;letter-spacing:3px;">{dots}</td>'
         f'</tr>'
         f'</table>'
     )
@@ -556,6 +618,11 @@ class ChatWidget(QWidget):
         self._stream_timer.setInterval(self._STREAM_INTERVAL_MS)
         self._stream_timer.timeout.connect(self._flush_stream)
 
+        self._think_frame = 0
+        self._think_timer = QTimer(self)
+        self._think_timer.setInterval(350)
+        self._think_timer.timeout.connect(self._tick_think)
+
         self.setAcceptDrops(True)
         self._build()
 
@@ -883,10 +950,18 @@ class ChatWidget(QWidget):
 
     def _show_thinking(self):
         self._is_thinking = True
+        self._think_frame = 0
+        self._think_timer.start()
         self._render_with_thinking()
 
     def _hide_thinking(self):
         self._is_thinking = False
+        self._think_timer.stop()
+
+    def _tick_think(self):
+        if self._is_thinking:
+            self._think_frame += 1
+            self._render_with_thinking()
 
     def set_persistent(self, is_persistent: bool):
         self._is_persistent = is_persistent
@@ -1050,13 +1125,13 @@ class ChatWidget(QWidget):
         self._render()
 
     def _render(self, no_scroll: bool = False):
-        extra = _thinking_row() if self._is_thinking else ""
+        extra = _thinking_row(self._think_frame) if self._is_thinking else ""
         self.browser.setHtml(MESSAGE_CSS + f"<body>{self._messages_html}{extra}</body>")
         if not no_scroll:
             self._scroll_bottom()
 
     def _render_with_thinking(self):
-        self.browser.setHtml(MESSAGE_CSS + f"<body>{self._messages_html}{_thinking_row()}</body>")
+        self.browser.setHtml(MESSAGE_CSS + f"<body>{self._messages_html}{_thinking_row(self._think_frame)}</body>")
         self._scroll_bottom()
 
     def _scroll_bottom(self):
