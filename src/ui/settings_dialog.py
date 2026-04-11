@@ -161,6 +161,7 @@ class AppSettingsDialog(QDialog):
         tabs = QTabWidget()
 
         tabs.addTab(self._tab_connection(), "Подключение")
+        tabs.addTab(self._tab_provider(),    "Провайдер")
         tabs.addTab(self._tab_prompts(),    "Промпты")
         tabs.addTab(self._tab_profile(),    "Профиль")
         tabs.addTab(self._tab_memory(),     "Память")
@@ -216,12 +217,96 @@ class AppSettingsDialog(QDialog):
         self.lang_combo.setCurrentIndex(idx)
         fl.addRow("Язык ответов:", self.lang_combo)
 
-        self.default_persistent = QCheckBox("По умолчанию — постоянный чат")
-        self.default_persistent.setChecked(
-            self.db.get_setting("default_persistent", "0") == "1")
-        fl.addRow("", self.default_persistent)
-
         return w
+
+    # ── Tab: Провайдер ────────────────────────────────────────────────────────────
+
+    def _tab_provider(self) -> QWidget:
+        from src.core.llm_client import PROVIDERS
+        w = QWidget()
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(16, 16, 16, 16)
+        vl.setSpacing(12)
+
+        vl.addWidget(QLabel("Провайдер:"))
+        self._provider_combo = QComboBox()
+        for pid, info in PROVIDERS.items():
+            self._provider_combo.addItem(info["name"], pid)
+        saved_p = self.db.get_setting("api_provider", "lmstudio")
+        idx_p = next((i for i in range(self._provider_combo.count())
+                      if self._provider_combo.itemData(i) == saved_p), 0)
+        self._provider_combo.setCurrentIndex(idx_p)
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        vl.addWidget(self._provider_combo)
+
+        self._provider_hint = QLabel("")
+        self._provider_hint.setStyleSheet("color:#555;font-size:11px;")
+        self._provider_hint.setWordWrap(True)
+        vl.addWidget(self._provider_hint)
+
+        vl.addWidget(QLabel("API-ключ:"))
+        self._api_key_edit = QLineEdit(self.db.get_setting("api_key", ""))
+        self._api_key_edit.setPlaceholderText("Вставьте API-ключ (если нужен)")
+        self._api_key_edit.setEchoMode(QLineEdit.Password)
+        vl.addWidget(self._api_key_edit)
+
+        show_key_btn = QPushButton("Показать/скрыть ключ")
+        show_key_btn.clicked.connect(self._toggle_key_visibility)
+        vl.addWidget(show_key_btn)
+
+        vl.addWidget(QLabel("URL API (оставьте пустым для дефолтного):"))
+        self._api_url_edit = QLineEdit(self.db.get_setting("lm_studio_url", "http://localhost:1234/v1"))
+        self._api_url_edit.setPlaceholderText("http://localhost:1234/v1")
+        vl.addWidget(self._api_url_edit)
+
+        test_btn = QPushButton("Проверить подключение")
+        test_btn.clicked.connect(self._test_connection)
+        vl.addWidget(test_btn)
+        self._test_result = QLabel("")
+        self._test_result.setWordWrap(True)
+        vl.addWidget(self._test_result)
+
+        vl.addStretch()
+        self._on_provider_changed(self._provider_combo.currentIndex())
+        return w
+
+    def _on_provider_changed(self, idx: int):
+        from src.core.llm_client import PROVIDERS
+        pid = self._provider_combo.itemData(idx)
+        info = PROVIDERS.get(pid, {})
+        hint = info.get("hint", "")
+        self._provider_hint.setText(hint)
+        needs_key = info.get("needs_key", False)
+        self._api_key_edit.setEnabled(needs_key)
+        # Pre-fill URL if it's still the old default
+        default_url = info.get("base_url", "")
+        if default_url:
+            self._api_url_edit.setPlaceholderText(default_url)
+
+    def _toggle_key_visibility(self):
+        if self._api_key_edit.echoMode() == QLineEdit.Password:
+            self._api_key_edit.setEchoMode(QLineEdit.Normal)
+        else:
+            self._api_key_edit.setEchoMode(QLineEdit.Password)
+
+    def _test_connection(self):
+        from src.core.llm_client import LLMClient, PROVIDERS
+        pid = self._provider_combo.currentData()
+        info = PROVIDERS.get(pid, {})
+        key = self._api_key_edit.text().strip()
+        url = self._api_url_edit.text().strip() or info.get("base_url", "")
+        try:
+            client = LLMClient(base_url=url, api_key=key)
+            models = client.get_models()
+            if models:
+                self._test_result.setText(f"✓ Подключено. Моделей: {len(models)}")
+                self._test_result.setStyleSheet("color:#4a9a5a;")
+            else:
+                self._test_result.setText("⚠ Подключено, но моделей нет.")
+                self._test_result.setStyleSheet("color:#ca9a38;")
+        except Exception as e:
+            self._test_result.setText(f"✗ Ошибка: {e}")
+            self._test_result.setStyleSheet("color:#da4848;")
 
     # ── Tab: Промпты ──────────────────────────────────────────────────────────
 
@@ -325,6 +410,11 @@ class AppSettingsDialog(QDialog):
         scroll.setWidget(self._mem_container)
         vl.addWidget(scroll, 1)
         self._load_memory_blocks()
+
+        self.default_persistent = QCheckBox("По умолчанию создавать постоянный чат")
+        self.default_persistent.setChecked(
+            self.db.get_setting("default_persistent", "0") == "1")
+        vl.addWidget(self.default_persistent)
 
         clear_btn = QPushButton("Очистить все воспоминания")
         clear_btn.clicked.connect(self._clear_memories)

@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.db = db
         self.agent = Agent(db)
+        self._apply_provider_settings()
         self._title_ready.connect(self._refresh_title_in_list)
         self.current_chat_id: int | None = None
         self._worker_chat_id: int | None = None
@@ -258,6 +259,17 @@ class MainWindow(QMainWindow):
         else:
             self.log_panel.hide()
         self.chat.set_log_btn_active(False)
+
+    def _apply_provider_settings(self):
+        """Apply saved provider/API-key/URL to the LLM client."""
+        from src.core.llm_client import PROVIDERS
+        pid     = self.db.get_setting("api_provider", "lmstudio")
+        api_key = self.db.get_setting("api_key", "")
+        # lm_studio_url stores the active URL regardless of provider
+        saved_url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
+        info = PROVIDERS.get(pid, PROVIDERS["lmstudio"])
+        base_url = saved_url or info["base_url"]
+        self.agent.llm.set_provider(pid, api_key=api_key, base_url_override=base_url)
 
     def _apply_user_avatar(self):
         import os
@@ -873,8 +885,7 @@ a{{color:#6a9fd8;text-decoration:none}}
         dlg = AppSettingsDialog(self.db, self)
         dlg.avatar_changed.connect(set_user_avatar)
         if dlg.exec_():
-            url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
-            self.agent.llm.base_url = url
+            self._apply_provider_settings()
             QTimer.singleShot(200, self._refresh_models)
             # Re-apply theme immediately
             from src.ui.theme import apply_theme

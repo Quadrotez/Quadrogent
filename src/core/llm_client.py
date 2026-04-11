@@ -17,6 +17,59 @@ from typing import Generator
 
 LM_STUDIO_URL = "http://localhost:1234/v1"
 
+# Known API providers — all OpenAI-compatible
+PROVIDERS = {
+    "lmstudio": {
+        "name": "LM Studio (локальный)",
+        "base_url": "http://localhost:1234/v1",
+        "needs_key": False,
+        "default_models": [],
+        "hint": "Локальный LM Studio — ключ не нужен",
+    },
+    "gemini": {
+        "name": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "needs_key": True,
+        "default_models": ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro"],
+        "hint": "API-ключ из Google AI Studio: aistudio.google.com",
+    },
+    "groq": {
+        "name": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "needs_key": True,
+        "default_models": ["llama-3.3-70b-versatile", "llama3-8b-8192", "mixtral-8x7b-32768"],
+        "hint": "API-ключ из Groq Console: console.groq.com",
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "needs_key": True,
+        "default_models": ["openai/gpt-4o-mini", "anthropic/claude-3.5-haiku", "google/gemini-2.0-flash-001", "meta-llama/llama-3.3-70b-instruct"],
+        "hint": "API-ключ из openrouter.ai/keys",
+    },
+    "mistral": {
+        "name": "Mistral AI",
+        "base_url": "https://api.mistral.ai/v1",
+        "needs_key": True,
+        "default_models": ["mistral-small-latest", "mistral-large-latest", "codestral-latest"],
+        "hint": "API-ключ из console.mistral.ai",
+    },
+    "gpt4free": {
+        "name": "GPT4Free (экспериментально)",
+        "base_url": "http://localhost:1337/v1",
+        "needs_key": False,
+        "default_models": ["gpt-4o", "gpt-4", "claude-3.5-sonnet", "gemini-pro"],
+        "hint": "Требует запущенного g4f API: pip install g4f && python -m g4f api",
+    },
+    "custom": {
+        "name": "Свой провайдер",
+        "base_url": "",
+        "needs_key": False,
+        "default_models": [],
+        "hint": "Любой OpenAI-совместимый API",
+    },
+}
+
 
 # ── Tools available in WORK mode ─────────────────────────────────────────────
 # write_file intentionally EXCLUDED — forces model to use execute_command+heredoc
@@ -259,12 +312,36 @@ AUTO_TOOLS = WORK_TOOLS + [
 
 
 class LLMClient:
-    def __init__(self, base_url: str = LM_STUDIO_URL):
-        self.base_url = base_url
+    def __init__(self, base_url: str = LM_STUDIO_URL, api_key: str = "",
+                 extra_headers: dict | None = None):
+        self.base_url = base_url.rstrip("/")
+        self.api_key  = api_key
         self.model: str | None = None
         self.session = requests.Session()
         self._active_response = None
-        self.on_log: callable | None = None  # Callback для логирования
+        self.on_log: callable | None = None
+        self._update_session_headers(api_key, extra_headers or {})
+
+    def _update_session_headers(self, api_key: str = "", extra: dict | None = None):
+        """Rebuild session headers from current api_key + extras."""
+        self.session.headers.clear()
+        self.session.headers.update({"Content-Type": "application/json"})
+        if api_key:
+            self.session.headers["Authorization"] = f"Bearer {api_key}"
+        for k, v in (extra or {}).items():
+            self.session.headers[k] = v
+
+    def set_provider(self, provider_id: str, api_key: str = "", base_url_override: str = ""):
+        """Switch to a different provider. Called from main_window after settings save."""
+        info = PROVIDERS.get(provider_id, PROVIDERS["lmstudio"])
+        self.base_url = (base_url_override or info["base_url"]).rstrip("/")
+        self.api_key  = api_key
+        # OpenRouter expects attribution headers
+        extra = {}
+        if provider_id == "openrouter":
+            extra = {"HTTP-Referer": "https://quadrogent.app", "X-Title": "Quadrogent"}
+        self._update_session_headers(api_key, extra)
+        self.model = None  # reset model — let caller set a new one
 
     def abort(self):
         r = self._active_response
