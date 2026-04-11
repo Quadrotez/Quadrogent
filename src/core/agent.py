@@ -215,8 +215,11 @@ _UPLOADS_ERROR = (
 )
 
 
-def _make_next_step(tool_name: str, exit_code, output_snippet: str) -> str:
+def _make_next_step(tool_name: str, exit_code, output_snippet: str,
+                    mode: str = "auto") -> str:
     """Context-aware continue prompt injected after each tool result."""
+    work_mode = (mode == "work")
+
     if exit_code is not None and exit_code != 0:
         return (
             f"❌ [Tool '{tool_name}' FAILED — exit code {exit_code}]\n"
@@ -228,6 +231,27 @@ def _make_next_step(tool_name: str, exit_code, output_snippet: str) -> str:
             "DO NOT move to the next step until this is fixed.\n"
             "DO NOT explain what's wrong - FIX IT."
         )
+
+    # web_search in non-work mode: tell model to ANSWER, not keep tool-calling
+    if tool_name == "web_search" and not work_mode:
+        return (
+            f"✓ [web_search results returned above]\n\n"
+            "You now have the search results. "
+            "ANSWER the user's question directly using these results. "
+            "Do NOT call any more tools. "
+            "Do NOT try to read files or save anything. "
+            "Just write your answer now."
+        )
+
+    if not work_mode:
+        # auto/talk/calc: soft nudge, not a hard demand to keep calling tools
+        return (
+            f"✓ [Tool '{tool_name}' done]\n"
+            "Use this result to answer the user. "
+            "Only call another tool if you genuinely need more information."
+        )
+
+    # work mode: hard push to keep going
     return (
         f"✓ [Tool '{tool_name}' succeeded]\n\n"
         "Good! Now call the NEXT tool immediately to continue.\n"
@@ -735,7 +759,7 @@ class Agent:
                         # Inject context-aware next-step prompt after EVERY tool
                         ec = _extract_exit_code(result)
                         snippet = _short_output(result)
-                        next_msg = _make_next_step(name, ec, snippet)
+                        next_msg = _make_next_step(name, ec, snippet, mode=mode)
                         messages.append({"role": "user", "content": next_msg})
 
                         # Periodic workspace snapshot to keep model oriented
