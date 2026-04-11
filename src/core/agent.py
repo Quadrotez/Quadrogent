@@ -269,7 +269,7 @@ class Agent:
         self.db = db
         self.llm = LLMClient()
         self.docker = DockerManager()
-        self.search = WebSearch()
+        self.search = WebSearch(db)
         self.files = FileManager()
         self.on_message:      Callable[[str, str], None]       | None = None
         self.on_tool_call:    Callable[[str, str, str], None]  | None = None

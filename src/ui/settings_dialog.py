@@ -51,6 +51,10 @@ class ChatSettingsDialog(QDialog):
             "title": self.title_edit.text().strip() or "Новый чат",
             "mode": self.mode_combo.currentText(),
         }
+        self.db.set_setting("search_engine",   self._search_engine.currentData())
+        self.db.set_setting("search_proxy",    self._search_proxy.text().strip())
+        self.db.set_setting("search_follow",   "1" if self._search_follow.isChecked() else "0")
+        self.db.set_setting("search_download", "1" if self._search_download.isChecked() else "0")
         self.db.set_setting("theme", self._theme_combo.currentData())
         self.db.set_setting("accent", self._accent_combo.currentData())
         self.db.set_setting("animations", "1" if self._animations_check.isChecked() else "0")
@@ -301,6 +305,40 @@ class AppSettingsDialog(QDialog):
         del_chats_btn.clicked.connect(self._delete_all_chats)
         mem_layout.addWidget(del_chats_btn)
         tabs.addTab(mem_widget, "Память")
+
+        # ── Поиск ────────────────────────────────────────
+        search_widget = QWidget()
+        search_layout = QFormLayout(search_widget)
+        search_layout.setSpacing(12)
+        search_layout.setContentsMargins(16, 16, 16, 16)
+
+        self._search_engine = QComboBox()
+        self._search_engine.addItem("DuckDuckGo (по умолчанию)", "duckduckgo")
+        self._search_engine.addItem("Google", "google")
+        self._search_engine.addItem("Bing", "bing")
+        saved_eng = self.db.get_setting("search_engine", "duckduckgo")
+        idx_eng = next((i for i in range(self._search_engine.count())
+                        if self._search_engine.itemData(i) == saved_eng), 0)
+        self._search_engine.setCurrentIndex(idx_eng)
+        search_layout.addRow("Поисковик:", self._search_engine)
+
+        self._search_proxy = QLineEdit(self.db.get_setting("search_proxy", ""))
+        self._search_proxy.setPlaceholderText("http://user:pass@host:port (необязательно)")
+        search_layout.addRow("Прокси:", self._search_proxy)
+
+        self._search_follow = QCheckBox("Переходить по ссылкам и читать страницы")
+        self._search_follow.setChecked(self.db.get_setting("search_follow", "0") == "1")
+        search_layout.addRow("", self._search_follow)
+
+        self._search_download = QCheckBox("Разрешить скачивать файлы по ссылке")
+        self._search_download.setChecked(self.db.get_setting("search_download", "0") == "1")
+        search_layout.addRow("", self._search_download)
+
+        max_lbl = QLabel("Больше результатов = медленнее, но точнее.")
+        max_lbl.setStyleSheet("color:#555;font-size:10px;")
+        search_layout.addRow("", max_lbl)
+
+        tabs.addTab(search_widget, "Поиск")
 
         # ── Внешний вид ───────────────────────────────────
         appear_widget = QWidget()
