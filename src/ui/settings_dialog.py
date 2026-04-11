@@ -311,16 +311,14 @@ class AppSettingsDialog(QDialog):
             self._api_key_edit = QLineEdit("")
             self._api_key_edit.setVisible(False)
 
-        # URL field — show provider's default, allow override
+        # URL field — use per-provider saved URL or provider default
         url_lbl = QLabel("URL API:")
         url_lbl.setStyleSheet("color:#888;font-size:11px;")
         self._provider_settings_vl.addWidget(url_lbl)
         default_url = info.get("base_url", "")
-        saved_url = self.db.get_setting("lm_studio_url", "")
-        saved_provider = self.db.get_setting("api_provider", "lmstudio")
-        # Use saved URL only if it's for the same provider, else use the default
-        cur_url = saved_url if (saved_provider == pid and saved_url) else default_url
-        self._api_url_edit = QLineEdit(cur_url)
+        # Store and restore per-provider URLs separately
+        saved_url = self.db.get_setting(f"api_url_{pid}", default_url)
+        self._api_url_edit = QLineEdit(saved_url)
         self._api_url_edit.setPlaceholderText(default_url or "https://...")
         self._provider_settings_vl.addWidget(self._api_url_edit)
 
@@ -794,6 +792,8 @@ class AppSettingsDialog(QDialog):
         custom_url = self._api_url_edit.text().strip() if hasattr(self, "_api_url_edit") else ""
         final_url = custom_url or _P.get(pid, {}).get("base_url", "http://localhost:1234/v1")
         self.db.set_setting("lm_studio_url", final_url)
+        # Also save per-provider URL so switching back restores it
+        self.db.set_setting(f"api_url_{pid}", final_url)
 
         # ── Подключение ──────────────────────────────────
         self.db.set_setting("temperature",   self.temp_edit.text().strip())

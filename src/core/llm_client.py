@@ -359,32 +359,49 @@ class LLMClient:
         except Exception:
             return False
 
+    def _parse_models_response(self, data) -> list[dict]:
+        """Parse /models response in various formats into [{id, vision}]."""
+        vision_keywords = ("vl", "vision", "visual", "llava", "minicpm",
+                           "qwen2-vl", "qwen2.5-vl", "pixtral", "phi-3-vision",
+                           "gemma-vision", "claude-3", "gpt-4-vision",
+                           "idefics", "cogvlm", "internvl", "molmo")
+        results = []
+        # Normalise: list or {"data": [...]} or {"models": [...]} or {"object":"list","data":[...]}
+        items = []
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("data") or data.get("models") or []
+        for m in items:
+            if isinstance(m, str):
+                mid = m
+            elif isinstance(m, dict):
+                mid = m.get("id") or m.get("name") or m.get("model") or ""
+            else:
+                continue
+            if not mid:
+                continue
+            has_vision = any(kw in mid.lower() for kw in vision_keywords)
+            if isinstance(m, dict):
+                props = m.get("props", {}) or {}
+                if props.get("vision") or props.get("multimodal"):
+                    has_vision = True
+            results.append({"id": mid, "vision": has_vision})
+        return results
+
     def get_models(self) -> list[str]:
         try:
-            r = self.session.get(f"{self.base_url}/models", timeout=5)
-            return [m["id"] for m in r.json().get("data", [])]
+            r = self.session.get(f"{self.base_url}/models", timeout=8)
+            r.raise_for_status()
+            return [m["id"] for m in self._parse_models_response(r.json())]
         except Exception:
             return []
 
     def get_models_with_meta(self) -> list[dict]:
-        """Return list of {id, vision} dicts. Vision detected by name heuristics."""
         try:
-            r = self.session.get(f"{self.base_url}/models", timeout=5)
-            models = []
-            for m in r.json().get("data", []):
-                mid = m.get("id", "")
-                # Vision heuristic: common keywords in model names
-                vision_keywords = ("vl", "vision", "visual", "llava", "minicpm",
-                                   "qwen2-vl", "qwen2.5-vl", "pixtral", "phi-3-vision",
-                                   "gemma-vision", "claude-3", "gpt-4-vision",
-                                   "idefics", "cogvlm", "internvl", "molmo")
-                has_vision = any(kw in mid.lower() for kw in vision_keywords)
-                # Also check model metadata if LM Studio provides it
-                props = m.get("props", {}) or {}
-                if props.get("vision") or props.get("multimodal"):
-                    has_vision = True
-                models.append({"id": mid, "vision": has_vision})
-            return models
+            r = self.session.get(f"{self.base_url}/models", timeout=8)
+            r.raise_for_status()
+            return self._parse_models_response(r.json())
         except Exception:
             return []
 
