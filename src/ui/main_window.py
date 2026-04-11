@@ -104,7 +104,8 @@ class MainWindow(QMainWindow):
         # ── Sidebar ──────────────────────────────────────
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(230)
+        sidebar.setMinimumWidth(160)
+        sidebar.setMaximumWidth(400)
         self._sidebar = sidebar  # keep reference for toggle
         self._sidebar_visible = True
         sb = QVBoxLayout(sidebar)
@@ -120,9 +121,8 @@ class MainWindow(QMainWindow):
         logo_layout.setSpacing(8)
 
         # Try to load logo image
-        logo_img_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "images", "logo.png"
-        )
+        from src.utils.static_paths import image as _img
+        logo_img_path = _img("logo.png")
         if os.path.exists(logo_img_path):
             logo_img = QLabel()
             pix = QPixmap(logo_img_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -187,7 +187,8 @@ class MainWindow(QMainWindow):
 
         # ── Right log panel ───────────────────────────────
         self.log_panel = RightLogPanel()
-        self.log_panel.setFixedWidth(320)
+        self.log_panel.setMinimumWidth(200)
+        self.log_panel.setMaximumWidth(600)
         self.log_panel.close_requested.connect(self._hide_log_panel)
         self._main_splitter.addWidget(self.log_panel)
         self.log_panel.hide()
@@ -195,6 +196,7 @@ class MainWindow(QMainWindow):
         self._main_splitter.setStretchFactor(0, 0)
         self._main_splitter.setStretchFactor(1, 1)
         self._main_splitter.setStretchFactor(2, 0)
+        self._main_splitter.setSizes([230, 900, 320])
         ml.addWidget(self._main_splitter)
 
     # ── Log panel toggle ───────────────────────────────────
@@ -205,7 +207,7 @@ class MainWindow(QMainWindow):
             self._sidebar_visible = False
             anim = QPropertyAnimation(self._sidebar, b"maximumWidth")
             anim.setDuration(200)
-            anim.setStartValue(230)
+            anim.setStartValue(max(self._sidebar.width(), 160))
             anim.setEndValue(0)
             anim.setEasingCurve(QEasingCurve.InCubic)
             anim.start()
@@ -227,19 +229,40 @@ class MainWindow(QMainWindow):
             self._show_log_panel()
 
     def _show_log_panel(self):
+        anims = getattr(__import__("builtins"), "_quadrogent_animations", True)
         self.log_panel.show()
+        if anims:
+            from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+            anim = QPropertyAnimation(self.log_panel, b"maximumWidth")
+            anim.setDuration(200)
+            anim.setStartValue(0)
+            anim.setEndValue(320)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.start()
+            self._log_anim = anim
         self.chat.set_log_btn_active(True)
 
     def _hide_log_panel(self):
-        self.log_panel.hide()
+        anims = getattr(__import__("builtins"), "_quadrogent_animations", True)
+        if anims:
+            from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+            anim = QPropertyAnimation(self.log_panel, b"maximumWidth")
+            anim.setDuration(160)
+            anim.setStartValue(self.log_panel.width())
+            anim.setEndValue(0)
+            anim.setEasingCurve(QEasingCurve.InCubic)
+            anim.finished.connect(self.log_panel.hide)
+            anim.finished.connect(lambda: self.log_panel.setMaximumWidth(600))
+            anim.start()
+            self._log_anim = anim
+        else:
+            self.log_panel.hide()
         self.chat.set_log_btn_active(False)
 
     def _apply_user_avatar(self):
         import os
-        default = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "..", "..", "images", "user.png"
-        ))
+        from src.utils.static_paths import image as _img
+        default = _img("user.png")
         path = self.db.get_setting("user_avatar", default)
         set_user_avatar(path)
 
@@ -480,12 +503,7 @@ class MainWindow(QMainWindow):
             self._pending_ai_title_text = ""
             def _gen_title():
                 try:
-                    msgs = [
-                        {"role": "system", "content": "Generate a very short chat title (3-6 words) for this user message. Respond ONLY with the title, no quotes."},
-                        {"role": "user", "content": _text[:300]},
-                    ]
-                    resp = self.agent.llm.chat(msgs, use_tools=False, stream=False)
-                    title = resp.get("content", "").strip()[:60]
+                    title = self.agent.generate_title(_text)
                     if title:
                         self.db.update_chat(_chat_id, title=title)
                         self._title_ready.emit(_chat_id, title)
@@ -842,6 +860,10 @@ a{{color:#6a9fd8;text-decoration:none}}
             url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
             self.agent.llm.base_url = url
             QTimer.singleShot(200, self._refresh_models)
+            # Re-apply theme immediately
+            from src.ui.theme import apply_theme
+            from PyQt5.QtWidgets import QApplication
+            apply_theme(QApplication.instance(), self.db)
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():

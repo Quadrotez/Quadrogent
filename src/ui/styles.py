@@ -10,8 +10,8 @@ QMainWindow, QDialog {
 }
 QWidget {
     background-color: #0a0a0a;
-    color: #e0e0e0;
-    font-family: "Inter", "Segoe UI", "SF Pro Text", sans-serif;
+    color: #e8e8e8;
+    font-family: "Roboto", "Inter", "Segoe UI", sans-serif;
     font-size: 13px;
 }
 
@@ -35,21 +35,21 @@ QWidget {
 #chatList { background-color: #070707; border: none; outline: none; }
 #chatList::item {
     padding: 9px 12px; border-radius: 6px;
-    color: #c0c0c0; margin: 1px 6px; font-size: 12px;
+    color: #d8d8d8; margin: 1px 6px; font-size: 12px;
     border-left: 2px solid transparent;
 }
 #chatList::item:selected {
     background-color: #111111; color: #e0e0e0;
     border-left: 2px solid #e0e0e0;
 }
-#chatList::item:hover:!selected { background-color: #0d0d0d; color: #777777; }
+#chatList::item:hover:!selected { background-color: #0d0d0d; color: #cccccc; }
 #settingsBtn {
-    background-color: transparent; color: #363636;
+    background-color: transparent; color: #888888;
     border: none; border-top: 1px solid #111111;
     font-size: 12px; padding: 11px 16px; margin: 0;
     border-radius: 0; text-align: left;
 }
-#settingsBtn:hover { background-color: #0d0d0d; color: #777777; }
+#settingsBtn:hover { background-color: #0d0d0d; color: #ffffff; }
 #clearBtn {
     background-color: transparent; color: #cc3333;
     border: none; border-top: 1px solid #111111;
@@ -64,12 +64,12 @@ QWidget {
     border-bottom: 1px solid #141414;
     min-height: 46px; max-height: 46px;
 }
-#modelLabel { color: #303030; font-size: 11px; background: transparent; }
+#modelLabel { color: #888888; font-size: 11px; background: transparent; }
 #modelCombo {
     background-color: transparent; border: 1px solid #1c1c1c;
-    border-radius: 5px; padding: 3px 8px; color: #595959; font-size: 11px; min-width: 190px;
+    border-radius: 5px; padding: 3px 8px; color: #c0c0c0; font-size: 11px; min-width: 190px;
 }
-#modelCombo:hover { border-color: #2c2c2c; color: #888888; }
+#modelCombo:hover { border-color: #2c2c2c; color: #ffffff; }
 #modelCombo::drop-down { border: none; width: 16px; }
 #modelCombo QAbstractItemView {
     background-color: #0c0c0c; border: 1px solid #1c1c1c;
@@ -131,7 +131,7 @@ QTextBrowser {
 
 /* ── Buttons ─────────────────────────── */
 QPushButton {
-    background-color: #0f0f0f; color: #777777;
+    background-color: #0f0f0f; color: #c0c0c0;
     border: 1px solid #1c1c1c; border-radius: 7px;
     padding: 7px 14px; font-size: 12px;
 }
@@ -154,13 +154,13 @@ QPushButton:pressed { background-color: #1c1c1c; }
 #attachBtn:hover { background-color: #0f0f0f; color: #666666; border-color: #272727; }
 
 /* ── Status / agent bar ──────────────── */
-#statusLabel { color: #262626; font-size: 11px; padding: 1px 0; }
+#statusLabel { color: #888888; font-size: 11px; padding: 1px 0; }
 #agentStatusBar {
     background: #080808; border-top: 1px solid #0e0e0e;
     padding: 0 16px; min-height: 26px; max-height: 26px;
 }
 #agentStatusLabel {
-    color: #242424; font-size: 11px; background: transparent;
+    color: #888888; font-size: 11px; background: transparent;
     letter-spacing: 0.5px; font-family: "JetBrains Mono", monospace;
 }
 
@@ -185,8 +185,8 @@ QComboBox QAbstractItemView {
 }
 
 /* ── Labels ──────────────────────────── */
-QLabel { color: #484848; background: transparent; }
-QCheckBox { color: #555555; spacing: 8px; }
+QLabel { color: #c8c8c8; background: transparent; }
+QCheckBox { color: #c0c0c0; spacing: 8px; }
 QCheckBox::indicator {
     width: 14px; height: 14px; border: 1px solid #282828;
     border-radius: 3px; background: #0d0d0d;
@@ -242,7 +242,7 @@ QTabBar::tab:hover:!selected { color: #555555; }
 
 /* ── Dialog ──────────────────────────── */
 QDialog { background: #0b0b0b; }
-QDialog QLabel { color: #606060; font-size: 12px; }
+QDialog QLabel { color: #c0c0c0; font-size: 12px; }
 QTextEdit {
     background-color: #0d0d0d; border: 1px solid #1a1a1a;
     border-radius: 5px; color: #888888; font-size: 12px; padding: 4px;

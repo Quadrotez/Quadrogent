@@ -136,6 +136,54 @@ WORK_TOOLS = [
 
 # ── Tools available in AUTO/TALK mode ────────────────────────────────────────
 # Includes write_file for simple single-file delivery tasks
+CALC_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_command",
+            "description": (
+                "Run a Python script or one-liner in Docker for calculations/data processing. "
+                "Use ONLY Python: python3 -c '...' or save script + run it. "
+                "No other shell commands."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Python execution command."}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_packages",
+            "description": "Install Python packages (pip only).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packages": {"type": "string"},
+                    "manager": {"type": "string", "enum": ["pip"], "default": "pip"}
+                },
+                "required": ["packages"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deliver_file",
+            "description": "Deliver result file to user.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"]
+            }
+        }
+    },
+]
+
 AUTO_TOOLS = WORK_TOOLS + [
     {
         "type": "function",
@@ -238,8 +286,9 @@ class LLMClient:
         if use_tools:
             if work_mode:
                 payload["tools"] = WORK_TOOLS
+            elif getattr(self, "_calc_mode", False):
+                payload["tools"] = CALC_TOOLS
             else:
-                # Filter out web_search if disabled
                 tools = AUTO_TOOLS if use_web_search else [
                     t for t in AUTO_TOOLS
                     if t.get("function", {}).get("name") != "web_search"

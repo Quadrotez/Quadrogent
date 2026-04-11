@@ -13,11 +13,11 @@ from PyQt5.QtGui import QTextCursor, QColor, QTextCharFormat, QFont
 
 DOCKER_LEVEL_CFG = {
     "info":  ("#6a6a6a", "  "),
-    "ok":    ("#4a9a5a", "✓ "),
-    "warn":  ("#ca9a38", "⚠ "),
-    "error": ("#da4848", "✗ "),
-    "cmd":   ("#5a8ab0", "$ "),
-    "out":   ("#5a5a5a", "  "),
+    "ok":    ("#4a9a5a", "OK "),
+    "warn":  ("#ca9a38", "!! "),
+    "error": ("#da4848", "EE "),
+    "cmd":   ("#5a8ab0", ">> "),
+    "out":   ("#5a5a5a", "   "),
 }
 
 
@@ -46,7 +46,7 @@ class RightLogPanel(QWidget):
         hl.addWidget(title)
         hl.addStretch()
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("x")
         close_btn.setObjectName("logCloseBtn")
         close_btn.setFixedSize(22, 22)
         close_btn.clicked.connect(self.close_requested.emit)

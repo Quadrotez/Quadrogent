@@ -19,9 +19,7 @@ try:
 except ImportError:
     _SVG_OK = False
 
-_ICONS_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "icons")
-)
+from src.utils.static_paths import ICONS as _ICONS_DIR
 
 
 @lru_cache(maxsize=128)

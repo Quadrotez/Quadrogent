@@ -17,8 +17,10 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
     QTextEdit, QPushButton, QLabel, QFileDialog,
     QSizePolicy, QMenu, QComboBox, QApplication,
+    QDialog, QListWidget,
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt5.QtWidgets import QGraphicsOpacityEffect
 from PyQt5.QtGui import QDesktopServices, QKeyEvent
 
 from src.ui.styles import MESSAGE_CSS
@@ -92,8 +94,12 @@ _LOGO_PATH: str = ""
 
 def _init_logo_path():
     global _LOGO_PATH
-    here = os.path.dirname(os.path.abspath(__file__))
-    p = os.path.normpath(os.path.join(here, "..", "..", "images", "logo.png"))
+    try:
+        from src.utils.static_paths import image as _img
+        p = _img("logo.png")
+    except Exception:
+        here = os.path.dirname(os.path.abspath(__file__))
+        p = os.path.normpath(os.path.join(here, "..", "..", "static", "images", "logo.png"))
     if os.path.exists(p):
         _LOGO_PATH = p
 
@@ -247,16 +253,19 @@ def _error_row(content_html: str) -> str:
     )
 
 
-_BRAIN_COLORS = ["#555555", "#777777", "#999999", "#777777"]
+_BRAIN_COLORS = ["#333333", "#888888", "#dddddd", "#888888"]
 
 
 def _brain_avatar(frame: int = 0) -> str:
-    """Pulsing brain (cpu-chip icon) for think mode."""
+    """Pulsing academic-cap icon during thinking."""
     color = _BRAIN_COLORS[frame % len(_BRAIN_COLORS)]
-    brain_dir = os.path.normpath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "icons"
-    ))
-    icon_path = os.path.join(brain_dir, "cpu-chip.svg")
+    try:
+        from src.utils.static_paths import icon as _icon_path
+        icon_path = _icon_path("academic-cap")
+        if not __import__("os").path.exists(icon_path):
+            icon_path = _icon_path("cpu-chip")
+    except Exception:
+        icon_path = ""
     if os.path.exists(icon_path):
         svg = open(icon_path).read().replace("currentColor", color)
         # Encode as data URI for QTextBrowser
@@ -274,19 +283,21 @@ def _brain_avatar(frame: int = 0) -> str:
 
 
 def _thinking_row(frame: int = 0) -> str:
-    """Pulsing brain animation during agent thinking."""
+    """Pulsing academic-cap animation during thinking."""
     color = _BRAIN_COLORS[frame % len(_BRAIN_COLORS)]
-    dots_colors = ["#222", "#333", "#444"]
-    dc = dots_colors[frame % len(dots_colors)]
+    # Build 3 animated dots that cycle
+    dot_colors = ["#555", "#999", "#ddd"]
+    dots = "".join(
+        f'<span style="color:{dot_colors[(frame + i) % 3]};font-size:20px;'
+        f'letter-spacing:1px;margin-right:2px;">&#8226;</span>'
+        for i in range(3)
+    )
     return (
         f'<table width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0;">'
         f'<tr>'
         f'<td width="18"></td>'
         f'<td width="36" valign="middle">{_brain_avatar(frame)}</td>'
-        f'<td valign="middle" style="padding-top:2px;">'
-        f'<span style="color:{color};font-size:13px;font-family:{MONO};'
-        f'letter-spacing:2px;">думаю&#x2026;</span>'
-        f'</td>'
+        f'<td valign="middle" style="padding:4px 0 0 6px;">{dots}</td>'
         f'</tr>'
         f'</table>'
     )
@@ -467,17 +478,44 @@ def _md_to_html(text: str) -> str:
 #  File helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-_EXT_ICONS = {
-    "py": "🐍", "js": "🟨", "ts": "🔷", "html": "🌐", "css": "🎨",
-    "json": "📋", "xml": "📋", "yaml": "📋", "yml": "📋",
-    "pdf": "📕", "doc": "📝", "docx": "📝", "xls": "📊", "xlsx": "📊",
-    "txt": "📄", "md": "📄", "csv": "📊",
-    "png": "🖼", "jpg": "🖼", "jpeg": "🖼", "gif": "🖼", "svg": "🖼",
-    "zip": "📦", "tar": "📦", "gz": "📦",
-    "mp3": "🎵", "wav": "🎵", "mp4": "🎬",
-    "sh": "⚙", "bat": "⚙", "exe": "⚙",
+# Maps extension to heroicon name
+_EXT_ICON_MAP = {
+    "py": "command-line", "js": "command-line", "ts": "command-line",
+    "sh": "command-line", "bat": "command-line",
+    "html": "globe-alt", "css": "paint-brush",
+    "json": "document-text", "xml": "document-text",
+    "yaml": "document-text", "yml": "document-text",
+    "pdf": "document", "doc": "document", "docx": "document",
+    "xls": "table-cells", "xlsx": "table-cells", "csv": "table-cells",
+    "txt": "document-text", "md": "document-text",
+    "png": "photo", "jpg": "photo", "jpeg": "photo",
+    "gif": "photo", "svg": "photo", "webp": "photo",
+    "zip": "archive-box", "tar": "archive-box", "gz": "archive-box",
+    "mp3": "musical-note", "wav": "musical-note",
+    "mp4": "film", "mov": "film",
+    "exe": "cpu-chip",
 }
-def _file_icon(fn): return _EXT_ICONS.get(fn.rsplit(".", 1)[-1].lower() if "." in fn else "", "📄")
+
+
+def _file_icon_svg(icon_name: str, color: str = "#666666", size: int = 20) -> str:
+    """Return an inline SVG <img> tag for use in Qt HTML."""
+    try:
+        from src.utils.static_paths import icon as _icon_path
+        import base64, os
+        path = _icon_path(icon_name)
+        if not os.path.exists(path):
+            path = _icon_path("document")
+        svg = open(path).read().replace("currentColor", color)
+        b64 = base64.b64encode(svg.encode()).decode()
+        return f'<img src="data:image/svg+xml;base64,{b64}" width="{size}" height="{size}"/>'
+    except Exception:
+        return "&#128196;"  # fallback: document char
+
+
+def _file_icon(fn: str) -> str:
+    ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+    icon_name = _EXT_ICON_MAP.get(ext, "document")
+    return _file_icon_svg(icon_name, "#666666", 20)
 def _file_size_str(path):
     try:
         s = os.path.getsize(path)
@@ -549,75 +587,134 @@ class FileChip(QWidget):
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
 
+class ModelPickerDialog(QDialog):
+    """Modal model picker with live search."""
+    model_selected = pyqtSignal(str)
+
+    def __init__(self, models: list, current: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Выбор модели")
+        self.setMinimumSize(500, 400)
+        self.setStyleSheet(
+            "QDialog{background:#0b0b0b;}"
+            "QLabel{color:#888;font-size:11px;}"
+            "QLineEdit{background:#111;border:1px solid #222;border-radius:7px;"
+            "          color:#e0e0e0;font-size:13px;padding:8px 12px;}"
+            "QListWidget{background:#080808;border:none;color:#d0d0d0;"
+            "            font-size:12px;outline:none;}"
+            "QListWidget::item{padding:10px 14px;border-radius:6px;margin:2px 6px;}"
+            "QListWidget::item:selected{background:#1a1a1a;color:#ffffff;}"
+            "QListWidget::item:hover:!selected{background:#111;color:#cccccc;}"
+            "QPushButton{background:#151515;border:1px solid #252525;border-radius:7px;"
+            "            color:#c0c0c0;font-size:12px;padding:8px 18px;}"
+            "QPushButton:hover{background:#1e1e1e;color:#ffffff;}"
+        )
+        self._all = models
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+        hdr = QLabel("Выберите модель:")
+        layout.addWidget(hdr)
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Поиск…")
+        self._search.textChanged.connect(self._filter)
+        layout.addWidget(self._search)
+        self._list = QListWidget()
+        self._fill(models, current)
+        self._list.itemDoubleClicked.connect(self._pick)
+        layout.addWidget(self._list, 1)
+        row = QHBoxLayout()
+        row.addStretch()
+        cancel = QPushButton("Отмена")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("Выбрать")
+        ok.setDefault(True)
+        ok.clicked.connect(self._pick)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        layout.addLayout(row)
+
+    def _fill(self, models, current=""):
+        self._list.clear()
+        for m in models:
+            from PyQt5.QtWidgets import QListWidgetItem
+            item = QListWidgetItem(m)
+            self._list.addItem(item)
+            if m == current:
+                self._list.setCurrentItem(item)
+
+    def _filter(self, text):
+        cur = self._list.currentItem()
+        self._fill([m for m in self._all if text.lower() in m.lower()],
+                   cur.text() if cur else "")
+
+    def _pick(self):
+        item = self._list.currentItem()
+        if item:
+            self.model_selected.emit(item.text())
+            self.accept()
+
+
 class ModelSelector(QWidget):
     model_changed   = pyqtSignal(str)
     refresh_clicked = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._loaded: list[str] = []
+        self._seen:   list[str] = []
+        self._current: str = ""
+        self._updating = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        layout.setSpacing(6)
         lbl = QLabel("Модель:")
         lbl.setObjectName("modelLabel")
         layout.addWidget(lbl)
+        self._btn = QPushButton("—")
+        self._btn.setObjectName("modelCombo")
+        self._btn.setFixedHeight(28)
+        self._btn.setMinimumWidth(200)
+        self._btn.setStyleSheet(
+            "QPushButton{background:transparent;border:1px solid #1c1c1c;"
+            "border-radius:5px;padding:3px 8px;color:#c0c0c0;font-size:11px;"
+            "text-align:left;}"
+            "QPushButton:hover{border-color:#2c2c2c;color:#ffffff;}"
+        )
+        self._btn.clicked.connect(self._open_picker)
+        layout.addWidget(self._btn)
+        # Hidden compatibility widgets
         self.combo = QComboBox()
-        self.combo.setObjectName("modelCombo")
-        self.combo.setFixedHeight(26)
-        self.combo.setMinimumWidth(200)
-        self.combo.currentIndexChanged.connect(self._on_changed)
-        layout.addWidget(self.combo)
+        self.combo.hide()
         self.refresh_btn = QPushButton()
-        self.refresh_btn.setObjectName("modelRefreshBtn")
-        self.refresh_btn.setFixedSize(26, 26)
-        self.refresh_btn.setToolTip("Обновить модели")
+        self.refresh_btn.hide()
         self.refresh_btn.clicked.connect(self.refresh_clicked.emit)
-        layout.addWidget(self.refresh_btn)
-        self._loaded: list[str] = []
-        self._current: str = ""
-        self._updating = False
 
-    def set_models(self, loaded, available):
+    def _open_picker(self):
+        all_m = self._seen if self._seen else self._loaded
+        dlg = ModelPickerDialog(all_m, self._current, self)
+        dlg.model_selected.connect(self._select)
+        dlg.exec_()
+
+    def _select(self, model_id: str):
+        if model_id != self._current:
+            self._current = model_id
+            self._btn.setText(model_id)
+            self.model_changed.emit(model_id)
+
+    def set_models(self, loaded: list, seen: list):
         self._loaded = loaded
-        self._updating = True
-        prev = self._current
-        self.combo.clear()
-        sections = [(m, True) for m in loaded] + [(m, False) for m in available if m not in loaded]
-        if not sections:
-            self.combo.addItem("(нет моделей)")
-            self._updating = False
-            return
-        target_idx = 0
-        from PyQt5.QtGui import QColor
-        for i, (model_id, is_loaded) in enumerate(sections):
-            self.combo.addItem(("● " if is_loaded else "○ ") + model_id, userData=model_id)
-            item = self.combo.model().item(i)
-            if item:
-                item.setForeground(QColor("#bbbbbb" if is_loaded else "#404040"))
-            if model_id == prev:
-                target_idx = i
-            elif is_loaded and not prev:
-                target_idx = i
-        self.combo.setCurrentIndex(target_idx)
-        if self.combo.count() > 0:
-            self._current = self.combo.itemData(target_idx) or ""
-        self._updating = False
+        self._seen = seen
 
-    def current_model(self): return self._current
-    def set_current_model(self, model_id):
+    def current_model(self):
+        return self._current
+
+    def set_current_model(self, model_id: str):
         self._current = model_id
-        self._updating = True
-        for i in range(self.combo.count()):
-            if self.combo.itemData(i) == model_id:
-                self.combo.setCurrentIndex(i)
-                break
-        self._updating = False
+        self._btn.setText(model_id if model_id else "—")
 
     def _on_changed(self, idx):
-        if self._updating: return
-        model_id = self.combo.itemData(idx)
-        if model_id and model_id != self._current:
-            self._current = model_id
-            self.model_changed.emit(model_id)
+        pass  # handled by _select
 
 
 
@@ -658,7 +755,7 @@ class QuickSettingsPanel(QWidget):
         lbl1.setStyleSheet("color:#404040;font-size:11px;min-width:52px;")
         row1.addWidget(lbl1)
         self._mode_btns = {}
-        for mode, label in (("auto", "Auto"), ("work", "Work"), ("talk", "Talk")):
+        for mode, label in (("auto", "Auto"), ("work", "Work"), ("talk", "Talk"), ("calc", "Calc")):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setFixedHeight(26)
@@ -799,6 +896,7 @@ class ChatWidget(QWidget):
         self._chat_title: str = "Чат"
         self._is_persistent: bool = False
         self._is_thinking: bool = False
+        self._fade_next: bool = False  # fade in on next full render (chat switch)
 
         self._stream_timer = QTimer(self)
         self._stream_timer.setInterval(self._STREAM_INTERVAL_MS)
@@ -1064,7 +1162,10 @@ class ChatWidget(QWidget):
         menu.addAction("🔧  Dev Logs",   lambda: self.export_chat.emit("devlogs"))
         menu.exec_(self._export_btn.mapToGlobal(self._export_btn.rect().bottomLeft()))
 
-    def set_chat_title(self, title: str): self._chat_title = title
+    def set_chat_title(self, title: str):
+        self._chat_title = title
+        if hasattr(self, "_title_lbl"):
+            self._title_lbl.setText(title)
     def get_export_data(self) -> dict:
         return {"title": self._chat_title, "messages": list(self._raw_messages),
                 "exported_at": datetime.now().isoformat()}
@@ -1190,6 +1291,7 @@ class ChatWidget(QWidget):
     def clear_messages(self):
         self._messages_html = ""
         self._raw_messages = []
+        self._fade_next = True  # animate next render
         self._render(no_scroll=True)
 
     def load_messages(self, messages: list[dict]):
@@ -1392,7 +1494,24 @@ class ChatWidget(QWidget):
 
     def _render(self, no_scroll: bool = False):
         extra = _thinking_row(self._think_frame) if self._is_thinking else ""
-        self.browser.setHtml(MESSAGE_CSS + f"<body>{self._messages_html}{extra}</body>")
+        html = MESSAGE_CSS + f"<body>{self._messages_html}{extra}</body>"
+        anims_on = getattr(__import__("builtins"), "_quadrogent_animations", True)
+        if self._fade_next and anims_on:
+            self._fade_next = False
+            # Fade in: start transparent, animate to full opacity
+            effect = QGraphicsOpacityEffect(self.browser)
+            self.browser.setGraphicsEffect(effect)
+            anim = QPropertyAnimation(effect, b"opacity")
+            anim.setDuration(220)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.finished.connect(lambda: self.browser.setGraphicsEffect(None))
+            self.browser.setHtml(html)
+            anim.start()
+            self._fade_anim = anim  # keep reference
+        else:
+            self.browser.setHtml(html)
         if not no_scroll:
             self._scroll_bottom()
 

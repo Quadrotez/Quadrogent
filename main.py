@@ -33,12 +33,26 @@ def main():
     app.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app.setApplicationName("Quadrogent")
 
+    # Register and apply custom fonts
+    from PyQt5.QtGui import QFontDatabase, QFont
+    import glob as _glob
+    fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "fonts")
+    for fp in sorted(_glob.glob(os.path.join(fonts_dir, "*.ttf"))):
+        QFontDatabase.addApplicationFont(fp)
+    # Set Roboto as the default application font
+    app_font = QFont("Roboto", 12)
+    app.setFont(app_font)
+
     # Set window/taskbar icon (critical for KDE Plasma and other WMs)
-    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "logo.png")
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "images", "logo.png")
     if os.path.exists(logo_path):
         app.setWindowIcon(QIcon(logo_path))
 
     db = Database()
+
+    # Apply persisted theme before showing window
+    from src.ui.theme import apply_theme
+    apply_theme(app, db)
     window = MainWindow(db)
     window.setWindowIcon(QIcon(logo_path) if os.path.exists(logo_path) else QIcon())
     window.show()

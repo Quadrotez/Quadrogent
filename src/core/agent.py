@@ -32,6 +32,29 @@ from src.core.web_search import WebSearch
 from src.utils.file_manager import FileManager
 from src.db.database import Database
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+
+def _encode_image_message(text: str, image_path: str) -> dict:
+    """Build a vision-capable user message with base64 image."""
+    import base64, mimetypes, os
+    ext = os.path.splitext(image_path)[1].lower()
+    mime = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".png": "image/png", ".gif": "image/gif",
+        ".webp": "image/webp", ".bmp": "image/bmp",
+    }.get(ext, "image/jpeg")
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    content_parts = []
+    if text:
+        content_parts.append({"type": "text", "text": text})
+    content_parts.append({
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime};base64,{b64}"}
+    })
+    return {"role": "user", "content": content_parts}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  System prompts
@@ -120,6 +143,20 @@ You are Quadrogent, an open-source AI agent. Respond in the user's language.
 Mode: Talk — have a normal conversation. Use markdown formatting.
 """
 
+SYSTEM_CALC = """You are Quadrogent — a scientific computation assistant. Respond in the user's language.
+
+MODE: Calc — you can run Python code to perform calculations, solve equations, process data.
+Workspace: /workspace/ — you may read/write files there.
+
+RULES:
+1. For any numerical computation, always run Python code — never guess.
+2. Use execute_command to run: python3 -c "..." or save+run a script.
+3. For results: show the code AND the output clearly.
+4. You may install Python packages via install_packages if needed.
+5. Deliver result files with deliver_file if producing output files.
+6. Do NOT use the shell for anything except running Python.
+"""
+
 SYSTEM_AUTO = """\
 You are Quadrogent — autonomous AI agent. Respond in the user's language.
 Workspace: /workspace/ (all files created here are visible to the user)
@@ -136,6 +173,11 @@ For questions: just answer with markdown.
 
 MEMORY_SUMMARIZE_PROMPT = (
     "Summarize this conversation in 1-3 sentences. What was discussed? Be brief."
+)
+
+TITLE_GEN_PROMPT_DEFAULT = (
+    "Generate a short chat title (max 40 characters) based on the user message. "
+    "Return ONLY the title text, no quotes, no punctuation at the end."
 )
 
 _HARD_REFORCE = (
@@ -497,18 +539,38 @@ class Agent:
         self._stop = False
         self.db.add_message(chat_id, "user", user_message)
 
+        # Detect attached image for vision
+        _image_path = None
+        import os as _os, re as _re
+        _img_match = _re.match(r'^\[Файл: (.+?)\]', user_message)
+        if _img_match:
+            _fname = _img_match.group(1)
+            _ext = _os.path.splitext(_fname)[1].lower()
+            if _ext in IMAGE_EXTENSIONS:
+                # Look in workspace
+                _ws = _os.path.abspath("workspace")
+                _p = _os.path.join(_ws, _fname)
+                if _os.path.exists(_p):
+                    _image_path = _p
+
         system = self._get_system_with_think(mode, think_mode)
         db_messages = self.db.get_messages(chat_id)
 
         messages = [{"role": "system", "content": system}]
         for m in db_messages:
             if m["role"] in ("user", "assistant"):
-                messages.append({"role": m["role"], "content": m["content"]})
+                msg = {"role": m["role"], "content": m["content"]}
+                # For the LAST user message, upgrade to vision if image attached
+                if m["role"] == "user" and m["content"] == user_message and _image_path:
+                    text_part = _re.sub(r'^\[Файл: .+?\]\n?', '', m["content"]).strip()
+                    msg = _encode_image_message(text_part or "Опиши это изображение.", _image_path)
+                messages.append(msg)
             elif m["role"] == "tool":
                 messages.append({"role": "user", "content": m["content"]})
 
-        use_tools  = mode in ("work", "auto")
+        use_tools  = mode in ("work", "auto", "calc")
         work_mode  = mode == "work"
+        self.llm._calc_mode = (mode == "calc")
         # "required" in work mode: model MUST call a tool every turn
         tool_choice = "required" if work_mode else "auto"
         delivered   = False
@@ -671,6 +733,23 @@ class Agent:
                 self._emit("error", error_msg)
                 self.db.add_message(chat_id, "assistant", error_msg)
                 return
+
+    def generate_title(self, user_message: str) -> str:
+        """Generate a short chat title. Uses custom prompt from DB if set."""
+        custom_prompt = self.db.get_setting("title_gen_prompt", "").strip()
+        sys_prompt = custom_prompt or TITLE_GEN_PROMPT_DEFAULT
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": user_message[:500]},
+        ]
+        try:
+            response = self.llm.chat(messages, use_tools=False, stream=False)
+            title = response.get("content", "").strip()
+            # Strip quotes and leading/trailing punctuation
+            title = title.strip(chr(34) + chr(39)).strip()
+            return title[:40] if title else ""
+        except Exception:
+            return ""
 
     def summarize_chat(self, chat_id: int) -> str:
         db_messages = self.db.get_messages(chat_id)
