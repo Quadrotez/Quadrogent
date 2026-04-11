@@ -233,7 +233,7 @@ def _make_next_step(tool_name: str, exit_code, output_snippet: str,
         )
 
     # web_search in non-work mode: tell model to ANSWER, not keep tool-calling
-    if tool_name == "web_search" and not work_mode:
+    if tool_name in ("web_search", "fetch_url") and not work_mode:
         return (
             f"✓ [web_search results returned above]\n\n"
             "You now have the search results. "
@@ -468,6 +468,23 @@ class Agent:
             formatted = self.search.format_results(results)
             self._emit_tool(name, query, formatted)
             return formatted
+
+        elif name == "fetch_url":
+            url = arguments.get("url", "").strip()
+            if not url:
+                result = "Error: no URL provided"
+                self._emit_tool(name, url, result)
+                return result
+            try:
+                from src.core.web_search import _fetch_page
+                proxy = self.db.get_setting("search_proxy", "") if self.db else ""
+                text = _fetch_page(url, proxy=proxy, max_chars=4000)
+                self._emit_tool(name, url, f"[{len(text)} chars]")
+                return text
+            except Exception as e:
+                result = f"Error fetching URL: {e}"
+                self._emit_tool(name, url, result)
+                return result
 
         elif name == "read_file":
             path = arguments.get("path", "")

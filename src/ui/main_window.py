@@ -17,7 +17,6 @@ from src.db.database import Database
 from src.core.agent import Agent
 from src.ui.chat_widget import ChatWidget
 from src.ui.settings_dialog import ChatSettingsDialog, AppSettingsDialog
-from src.ui.styles import DARK_THEME
 from src.ui.chat_widget import set_user_avatar
 from src.ui.icon_helper import apply_icon, get_icon
 from PyQt5.QtCore import QSize
@@ -74,7 +73,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Quadrogent")
         self.setMinimumSize(960, 640)
         self.resize(1340, 800)
-        self.setStyleSheet(DARK_THEME)
 
         self._build()
         self._load_chats()

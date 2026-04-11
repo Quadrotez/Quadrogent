@@ -184,6 +184,29 @@ CALC_TOOLS = [
     },
 ]
 
+FETCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "fetch_url",
+        "description": (
+            "Fetch the text content of any URL (web page, article, link). "
+            "Use this when the user shares a URL and wants you to read it, "
+            "or when search results reference a page you need to open. "
+            "Returns the page text (up to 4000 chars)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Full URL to fetch, e.g. https://example.com/page"
+                }
+            },
+            "required": ["url"]
+        }
+    }
+}
+
 AUTO_TOOLS = WORK_TOOLS + [
     {
         "type": "function",

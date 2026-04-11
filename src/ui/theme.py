@@ -299,7 +299,12 @@ def apply_theme(app, db):
     a      = _ACCENTS.get(accent, _ACCENTS["mono"])
 
     stylesheet = _build_stylesheet(colors, a, anims)
+
+    # Apply to application AND every top-level widget to override any local stylesheets
     app.setStyleSheet(stylesheet)
+    for widget in app.topLevelWidgets():
+        widget.setStyleSheet("")  # clear any window-level overrides
+        widget.update()
 
     # Store animations flag globally for animated widgets to check
     import builtins
