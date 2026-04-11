@@ -331,7 +331,8 @@ class LLMClient:
         for k, v in (extra or {}).items():
             self.session.headers[k] = v
 
-    def set_provider(self, provider_id: str, api_key: str = "", base_url_override: str = ""):
+    def set_provider(self, provider_id: str, api_key: str = "",
+                     base_url_override: str = "", proxy: str = ""):
         """Switch to a different provider. Called from main_window after settings save."""
         info = PROVIDERS.get(provider_id, PROVIDERS["lmstudio"])
         self.base_url = (base_url_override or info["base_url"]).rstrip("/")
@@ -341,6 +342,11 @@ class LLMClient:
         if provider_id == "openrouter":
             extra = {"HTTP-Referer": "https://quadrogent.app", "X-Title": "Quadrogent"}
         self._update_session_headers(api_key, extra)
+        # Apply proxy to session
+        if proxy:
+            self.session.proxies = {"http": proxy, "https": proxy}
+        else:
+            self.session.proxies = {}
         self.model = None  # reset model — let caller set a new one
 
     def abort(self):

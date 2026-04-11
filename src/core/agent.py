@@ -853,7 +853,23 @@ class Agent:
             except Exception as e:
                 if self.on_stream_end:
                     self.on_stream_end()
-                error_msg = f"Ошибка подключения к LLM: {e}"
+                err_str = str(e)
+                # Friendly messages for common errors
+                if "Connection refused" in err_str or "ConnectionError" in err_str:
+                    hint = "Провайдер недоступен. Проверьте, что сервис запущен и URL правильный."
+                elif "401" in err_str or "Unauthorized" in err_str:
+                    hint = "Неверный API-ключ (401 Unauthorized). Проверьте ключ в настройках."
+                elif "403" in err_str or "Forbidden" in err_str:
+                    hint = "Доступ запрещён (403). Проверьте API-ключ и права доступа."
+                elif "429" in err_str or "rate limit" in err_str.lower():
+                    hint = "Превышен лимит запросов (429). Подождите немного или смените провайдера."
+                elif "timeout" in err_str.lower():
+                    hint = "Время ожидания истекло. Провайдер не отвечает."
+                elif "model" in err_str.lower() and ("not found" in err_str.lower() or "does not exist" in err_str.lower()):
+                    hint = f"Модель не найдена у провайдера. Выберите другую модель."
+                else:
+                    hint = ""
+                error_msg = f"⚠ Ошибка: {err_str}" + (f"\n\n{hint}" if hint else "")
                 self._emit("error", error_msg)
                 self.db.add_message(chat_id, "assistant", error_msg)
                 return

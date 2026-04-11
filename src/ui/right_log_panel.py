@@ -75,7 +75,7 @@ class RightLogPanel(QWidget):
         self._lm_log.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
 
-        self._tabs.addTab(self._lm_log, "LM Studio")
+        self._tabs.addTab(self._lm_log, "Модель/API")
         layout.addWidget(self._tabs, 1)
 
         # ── Docker status bar ─────────────────────────────

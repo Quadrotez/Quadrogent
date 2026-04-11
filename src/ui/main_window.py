@@ -85,7 +85,12 @@ class MainWindow(QMainWindow):
         self._refresh_models()
 
         if not self.agent.llm.check_connection():
-            self.chat.status_label.setText("⚠ LM Studio не найден (localhost:1234)")
+            from src.core.llm_client import PROVIDERS
+            pid  = self.db.get_setting("api_provider", "lmstudio")
+            info = PROVIDERS.get(pid, PROVIDERS["lmstudio"])
+            url  = self.agent.llm.base_url
+            name = info["name"]
+            self.chat.status_label.setText(f"⚠ {name} недоступен ({url})")
 
         self._init_docker_async()
         self._apply_user_avatar()
@@ -261,15 +266,16 @@ class MainWindow(QMainWindow):
         self.chat.set_log_btn_active(False)
 
     def _apply_provider_settings(self):
-        """Apply saved provider/API-key/URL to the LLM client."""
+        """Apply saved provider/API-key/URL/proxy to the LLM client."""
         from src.core.llm_client import PROVIDERS
-        pid     = self.db.get_setting("api_provider", "lmstudio")
-        api_key = self.db.get_setting("api_key", "")
-        # lm_studio_url stores the active URL regardless of provider
+        pid      = self.db.get_setting("api_provider", "lmstudio")
+        api_key  = self.db.get_setting("api_key", "")
+        proxy    = self.db.get_setting("llm_proxy", "")
         saved_url = self.db.get_setting("lm_studio_url", "http://localhost:1234/v1")
-        info = PROVIDERS.get(pid, PROVIDERS["lmstudio"])
+        info     = PROVIDERS.get(pid, PROVIDERS["lmstudio"])
         base_url = saved_url or info["base_url"]
-        self.agent.llm.set_provider(pid, api_key=api_key, base_url_override=base_url)
+        self.agent.llm.set_provider(pid, api_key=api_key,
+                                    base_url_override=base_url, proxy=proxy)
 
     def _apply_user_avatar(self):
         import os
@@ -482,7 +488,7 @@ class MainWindow(QMainWindow):
     def _on_agent_tool(self, name: str, args: str, result: str):
         if self.current_chat_id == self._worker_chat_id:
             self.chat.add_tool_message(name, args, result)
-        # Mirror every tool call to the LM Studio log panel
+        # Mirror every tool call to the Model/API log panel
         # so the right-side logs are never empty during a work session.
         short_args   = args[:120] + ("…" if len(args) > 120 else "")
         short_result = result[:200] + ("…" if len(result) > 200 else "")
@@ -504,8 +510,20 @@ class MainWindow(QMainWindow):
         self.log_panel.append_lm_log("── done ───────────────────────────")
 
     def _on_lm_log(self, message: str):
-        """Обработчик логов от LM Studio."""
+        """Обработчик логов от LLM провайдера."""
         self.log_panel.append_lm_log(message)
+
+    def get_llm_status(self) -> str:
+        """Return a human-readable current LLM status for display."""
+        from src.core.llm_client import PROVIDERS
+        pid   = self.db.get_setting("api_provider", "lmstudio")
+        info  = PROVIDERS.get(pid, PROVIDERS["lmstudio"])
+        name  = info["name"]
+        url   = self.agent.llm.base_url
+        model = self.agent.llm.model or "—"
+        ok    = self.agent.llm.check_connection()
+        s     = "✓ подключено" if ok else "✗ нет соединения"
+        return name + "\n" + url + "\nМодель: " + model + "\n" + s
 
     def _on_agent_done(self):
         self.chat.set_busy(False)
@@ -820,7 +838,7 @@ a{{color:#6a9fd8;text-decoration:none}}
         else:
             lines.append("(No Docker logs available)")
         
-        # LM Studio logs
+        # Model/API logs
         lines.extend([
             "",
             "=" * 80,

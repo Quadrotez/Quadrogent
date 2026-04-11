@@ -322,6 +322,14 @@ class AppSettingsDialog(QDialog):
         self._api_url_edit.setPlaceholderText(default_url or "https://...")
         self._provider_settings_vl.addWidget(self._api_url_edit)
 
+        # LLM proxy (separate from web search proxy)
+        proxy_lbl = QLabel("Прокси для подключения к API:")
+        proxy_lbl.setStyleSheet("color:#888;font-size:11px;")
+        self._provider_settings_vl.addWidget(proxy_lbl)
+        self._llm_proxy_edit = QLineEdit(self.db.get_setting("llm_proxy", ""))
+        self._llm_proxy_edit.setPlaceholderText("http://user:pass@host:port  (необязательно)")
+        self._provider_settings_vl.addWidget(self._llm_proxy_edit)
+
         # Provider-specific extras
         if pid == "lmstudio":
             note = QLabel("Убедитесь, что LM Studio запущен и сервер активен.")
@@ -789,6 +797,8 @@ class AppSettingsDialog(QDialog):
         self.db.set_setting("api_provider", pid)
         api_key = self._api_key_edit.text().strip() if hasattr(self, "_api_key_edit") else ""
         self.db.set_setting("api_key", api_key)
+        llm_proxy = self._llm_proxy_edit.text().strip() if hasattr(self, "_llm_proxy_edit") else ""
+        self.db.set_setting("llm_proxy", llm_proxy)
         custom_url = self._api_url_edit.text().strip() if hasattr(self, "_api_url_edit") else ""
         final_url = custom_url or _P.get(pid, {}).get("base_url", "http://localhost:1234/v1")
         self.db.set_setting("lm_studio_url", final_url)
