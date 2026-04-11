@@ -624,15 +624,29 @@ class Agent:
             if _ext in IMAGE_EXTENSIONS and _os.path.exists(_p):
                 _image_path = _p
             # Always inject the exact quoted path so model never has to guess escaping
-            _file_injection = (
-                f"[SYSTEM NOTE] The attached file is available at:\n"
-                f"  /workspace/{_fname}\n"
-                f"IMPORTANT: ALWAYS access it with DOUBLE QUOTES to handle spaces/Unicode:\n"
-                f'  Correct:   cat "/workspace/{_fname}"\n'
-                f'  Wrong:     cat /workspace/{_fname}\n'
-                f'  Wrong:     cat /workspace/\\\"escaped\\\".txt\n'
-                f"Run `ls /workspace/` first if unsure about the exact filename."
-            )
+            # Try to read file content immediately so model doesn't need to call read_file
+            _file_content = ""
+            try:
+                with open(_p, "r", encoding="utf-8", errors="replace") as _f:
+                    _file_content = _f.read()
+            except Exception:
+                pass
+
+            if _file_content:
+                _file_injection = (
+                    f"[SYSTEM NOTE] The attached file '{_fname}' has been pre-loaded.\n"
+                    f"You do NOT need to call read_file — the content is below.\n"
+                    f"File path (if you need it): /workspace/{_fname}\n\n"
+                    f"--- FILE CONTENT START ---\n"
+                    f"{_file_content[:8000]}\n"
+                    f"--- FILE CONTENT END ---\n\n"
+                    f"Use this content directly. Do NOT call read_file again."
+                )
+            else:
+                _file_injection = (
+                    f"[SYSTEM NOTE] The attached file is at /workspace/{_fname}\n"
+                    f"ALWAYS quote the path: cat \"/workspace/{_fname}\""
+                )
 
         system = self._get_system_with_think(mode, think_mode, persistent=persistent)
         db_messages = self.db.get_messages(chat_id)
@@ -662,6 +676,8 @@ class Agent:
         tool_call_count = 0
         max_iterations  = 60
         silent_stops    = 0  # consecutive turns with no content and no tools
+        _recent_calls: list[tuple] = []  # (tool_name, arg_hash) for loop detection
+        _LOOP_THRESHOLD = 3  # same call 3 times = stuck
 
         # Inject initial workspace snapshot so model knows what already exists.
         # Prevents repeated "startproject" / "mkdir" when workspace is not empty.
@@ -765,10 +781,14 @@ class Agent:
                 # The call is malformed/empty — skip it and re-prompt to continue.
                 if finish_reason == "length":
                     _LENGTH_MSG = (
-                        "⚠️ Your last response was cut off (max tokens reached). "
-                        "The tool call was incomplete and was NOT executed. "
-                        "Continue the task from where you left off — "
-                        "call the same tool again with full arguments."
+                        "⚠️ Max tokens reached — your last tool call was CUT OFF and NOT executed.\n\n"
+                        "CRITICAL: Do NOT repeat the same large call. Instead:\n"
+                        "1. If writing a large file: use heredoc to write it in CHUNKS\n"
+                        "   (e.g. first write the HTML head, then body section by section)\n"
+                        "2. If reading: you may already have the data from earlier — check context.\n"
+                        "3. Never re-read a file you already read earlier in this session.\n"
+                        "4. Call the NEXT logical step, not the same huge step again.\n"
+                        "Continue the task — do NOT start over."
                     )
                     messages.append({"role": "user", "content": _LENGTH_MSG})
                     self.db.add_message(chat_id, "tool", _LENGTH_MSG)
@@ -784,6 +804,25 @@ class Agent:
                         args = json.loads(func.get("arguments", "{}"))
                     except json.JSONDecodeError:
                         args = {}
+
+                    # Loop detection: same tool + same args repeated too many times
+                    call_sig = (name, repr(sorted(args.items()) if isinstance(args, dict) else args))
+                    _recent_calls.append(call_sig)
+                    if len(_recent_calls) > 10:
+                        _recent_calls.pop(0)
+                    repeated = _recent_calls.count(call_sig)
+                    if repeated >= _LOOP_THRESHOLD:
+                        loop_msg = (
+                            f"⛔ LOOP DETECTED: You called {name}({args}) {repeated} times in a row.\n"
+                            f"This call returns the same result every time. STOP calling it.\n"
+                            f"You already have the information. Use it to proceed with the task.\n"
+                            f"If you need to write a large file, break it into smaller pieces using heredoc.\n"
+                            f"Call the NEXT step, not the same step again."
+                        )
+                        messages.append({"role": "user", "content": loop_msg})
+                        self.db.add_message(chat_id, "tool", loop_msg)
+                        _recent_calls.clear()  # reset after warning
+                        continue  # skip executing this call
 
                     result = self._execute_tool(name, args)
                     tool_call_count += 1
