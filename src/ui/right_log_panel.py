@@ -56,32 +56,6 @@ class RightLogPanel(QWidget):
 
         # ── Tabs ─────────────────────────────────────────
         self._tabs = QTabWidget()
-        self._tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                background: #050505;
-            }
-            QTabBar {
-                background: #070707;
-            }
-            QTabBar::tab {
-                background: transparent;
-                color: #2a2a2a;
-                padding: 6px 14px;
-                border: none;
-                border-bottom: 1px solid transparent;
-                font-size: 10px;
-                letter-spacing: 0.8px;
-                font-family: "JetBrains Mono", "Consolas", monospace;
-                text-transform: uppercase;
-            }
-            QTabBar::tab:selected {
-                color: #888888;
-                border-bottom: 1px solid #555555;
-            }
-            QTabBar::tab:hover:!selected { color: #505050; }
-            QTabBar::tab:first { margin-left: 4px; }
-        """)
 
         # Docker log tab
         self._docker_log = QTextEdit()
@@ -89,19 +63,7 @@ class RightLogPanel(QWidget):
         self._docker_log.setReadOnly(True)
         self._docker_log.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._docker_log.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._docker_log.setStyleSheet("""
-            QTextEdit {
-                background: #050505;
-                border: none;
-                font-family: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
-                font-size: 11px;
-                color: #6a6a6a;
-                padding: 8px 12px;
-            }
-            QScrollBar:vertical { background: transparent; width: 3px; }
-            QScrollBar::handle:vertical { background: #1a1a1a; border-radius: 1px; min-height: 16px; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-        """)
+
 
         self._tabs.addTab(self._docker_log, "Docker")
 
@@ -111,31 +73,58 @@ class RightLogPanel(QWidget):
         self._lm_log.setReadOnly(True)
         self._lm_log.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._lm_log.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._lm_log.setStyleSheet("""
-            QTextEdit {
-                background: #050505;
-                border: none;
-                font-family: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
-                font-size: 11px;
-                color: #6a6a6a;
-                padding: 8px 12px;
-            }
-            QScrollBar:vertical { background: transparent; width: 3px; }
-            QScrollBar::handle:vertical { background: #1a1a1a; border-radius: 1px; min-height: 16px; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-        """)
+
 
         self._tabs.addTab(self._lm_log, "LM Studio")
         layout.addWidget(self._tabs, 1)
 
         # ── Docker status bar ─────────────────────────────
         self._docker_status = QLabel("  инициализация…")
-        self._docker_status.setStyleSheet(
-            "color: #303030; font-size: 10px; padding: 5px 14px; "
-            "background: #070707; border-top: 1px solid #0f0f0f; "
-            "font-family: 'JetBrains Mono', monospace; letter-spacing: 0.3px;"
-        )
+
         layout.addWidget(self._docker_status)
+        self.refresh_theme()
+
+    def refresh_theme(self):
+        """Re-apply theme-aware styles to log widgets."""
+        import builtins
+        light = getattr(builtins, "_quadrogent_theme", "dark") == "light"
+        log_bg    = "#f0f0f0" if light else "#050505"
+        log_txt   = "#444444" if light else "#6a6a6a"
+        tab_bg    = "#e8e8e8" if light else "#070707"
+        tab_txt   = "#666666" if light else "#2a2a2a"
+        tab_sel   = "#111111" if light else "#888888"
+        tab_bd    = "#888888" if light else "#555555"
+        stat_bg   = "#e8e8e8" if light else "#070707"
+        stat_txt  = "#555555" if light else "#303030"
+        stat_bd   = "#cccccc" if light else "#0f0f0f"
+
+        log_css = (
+            f"QTextEdit{{background:{log_bg};border:none;"
+            f"font-family:'JetBrains Mono','Consolas',monospace;"
+            f"font-size:11px;color:{log_txt};padding:8px 12px;}}"
+            f"QScrollBar:vertical{{background:transparent;width:3px;}}"
+            f"QScrollBar::handle:vertical{{background:#888;border-radius:1px;min-height:16px;}}"
+            f"QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{{height:0;}}"
+        )
+        self._docker_log.setStyleSheet(log_css)
+        self._lm_log.setStyleSheet(log_css)
+
+        self._tabs.setStyleSheet(
+            f"QTabWidget::pane{{border:none;background:{log_bg};}}"
+            f"QTabBar{{background:{tab_bg};}}"
+            f"QTabBar::tab{{background:transparent;color:{tab_txt};"
+            f"padding:6px 14px;border:none;border-bottom:1px solid transparent;"
+            f"font-size:10px;letter-spacing:0.8px;"
+            f"font-family:'JetBrains Mono',monospace;text-transform:uppercase;}}"
+            f"QTabBar::tab:selected{{color:{tab_sel};border-bottom:1px solid {tab_bd};}}"
+            f"QTabBar::tab:hover:!selected{{color:#777;}}"
+            f"QTabBar::tab:first{{margin-left:4px;}}"
+        )
+        self._docker_status.setStyleSheet(
+            f"color:{stat_txt};font-size:10px;padding:5px 14px;"
+            f"background:{stat_bg};border-top:1px solid {stat_bd};"
+            f"font-family:'JetBrains Mono',monospace;letter-spacing:0.3px;"
+        )
 
     # ── Public API ─────────────────────────────────────────
 

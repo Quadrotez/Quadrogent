@@ -716,20 +716,8 @@ class ModelPickerDialog(QDialog):
         self._vision_ids = vision_ids or set()
         self.setWindowTitle("Выбор модели")
         self.setMinimumSize(500, 400)
-        self.setStyleSheet(
-            "QDialog{background:#0b0b0b;}"
-            "QLabel{color:#888;font-size:11px;}"
-            "QLineEdit{background:#111;border:1px solid #222;border-radius:7px;"
-            "          color:#e0e0e0;font-size:13px;padding:8px 12px;}"
-            "QListWidget{background:#080808;border:none;color:#d0d0d0;"
-            "            font-size:12px;outline:none;}"
-            "QListWidget::item{padding:10px 14px;border-radius:6px;margin:2px 6px;}"
-            "QListWidget::item:selected{background:#1a1a1a;color:#ffffff;}"
-            "QListWidget::item:hover:!selected{background:#111;color:#cccccc;}"
-            "QPushButton{background:#151515;border:1px solid #252525;border-radius:7px;"
-            "            color:#c0c0c0;font-size:12px;padding:8px 18px;}"
-            "QPushButton:hover{background:#1e1e1e;color:#ffffff;}"
-        )
+        # No hardcoded stylesheet - inherit from QApplication theme
+        pass
         self._all = models
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)

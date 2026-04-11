@@ -879,11 +879,12 @@ a{{color:#6a9fd8;text-decoration:none}}
             # Re-render current chat with new colors
             if self.current_chat_id is not None:
                 self.chat.load_messages(self.db.get_messages(self.current_chat_id))
-            # Update browser background to match theme
+            # Update browser background and log panel to match theme
             import builtins
             theme = getattr(builtins, "_quadrogent_theme", "dark")
             bg = "#f5f5f5" if theme == "light" else "#0a0a0a"
             self.chat.browser.setStyleSheet(f"background:{bg};border:none;")
+            self.log_panel.refresh_theme()
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
