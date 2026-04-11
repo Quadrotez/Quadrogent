@@ -88,7 +88,13 @@ EXECUTE EVERY STEP until the task is DONE.
 11. ⚠️ READ tool output! If you see [OK] or "already satisfied", DO NOT repeat the command.
 12. ⚠️ CRITICAL: There is NO "uploads/" directory! NEVER use "uploads/" in ANY command!
 13. ⚠️ WRONG: zip -r uploads/file.zip | RIGHT: zip -r file.zip
-14. ⚠️ ALWAYS quote paths with spaces: cat "/workspace/my file.txt" not cat /workspace/my file.txt
+14. ⚠️ FILE PATHS — ALWAYS use DOUBLE QUOTES around ANY path in /workspace/:
+    CORRECT:   cat "/workspace/Текстовый файл.txt"
+    CORRECT:   stat "/workspace/madk1d - давно.mp3"
+    WRONG:     cat /workspace/Текстовый\ файл.txt
+    WRONG:     cat /workspace/madk1d\ -\ давно.mp3
+    This is MANDATORY for ALL filenames, especially those with spaces, Cyrillic, or special chars.
+    When in doubt: ls /workspace/ | head -20  to see the exact filename, then quote it.
 
 ━━━ HOW TO CREATE FILES (heredoc) ━━━
 execute_command:
@@ -540,19 +546,28 @@ class Agent:
         self._stop = False
         self.db.add_message(chat_id, "user", user_message)
 
-        # Detect attached image for vision
+        # Detect attached file / image
         _image_path = None
+        _file_injection = None   # extra context message about the attached file path
         import os as _os, re as _re
         _img_match = _re.match(r'^\[Файл: (.+?)\]', user_message)
         if _img_match:
             _fname = _img_match.group(1)
+            _ws = _os.path.abspath("workspace")
+            _p = _os.path.join(_ws, _fname)
             _ext = _os.path.splitext(_fname)[1].lower()
-            if _ext in IMAGE_EXTENSIONS:
-                # Look in workspace
-                _ws = _os.path.abspath("workspace")
-                _p = _os.path.join(_ws, _fname)
-                if _os.path.exists(_p):
-                    _image_path = _p
+            if _ext in IMAGE_EXTENSIONS and _os.path.exists(_p):
+                _image_path = _p
+            # Always inject the exact quoted path so model never has to guess escaping
+            _file_injection = (
+                f"[SYSTEM NOTE] The attached file is available at:\n"
+                f"  /workspace/{_fname}\n"
+                f"IMPORTANT: ALWAYS access it with DOUBLE QUOTES to handle spaces/Unicode:\n"
+                f'  Correct:   cat "/workspace/{_fname}"\n'
+                f'  Wrong:     cat /workspace/{_fname}\n'
+                f'  Wrong:     cat /workspace/\\\"escaped\\\".txt\n'
+                f"Run `ls /workspace/` first if unsure about the exact filename."
+            )
 
         system = self._get_system_with_think(mode, think_mode)
         db_messages = self.db.get_messages(chat_id)
@@ -568,6 +583,10 @@ class Agent:
                 messages.append(msg)
             elif m["role"] == "tool":
                 messages.append({"role": "user", "content": m["content"]})
+
+        # Inject file path note right after user's first message (before model responds)
+        if _file_injection:
+            messages.append({"role": "user", "content": _file_injection})
 
         use_tools  = mode in ("work", "auto", "calc")
         work_mode  = mode == "work"
