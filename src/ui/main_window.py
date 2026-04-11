@@ -870,6 +870,9 @@ a{{color:#6a9fd8;text-decoration:none}}
             from src.ui.theme import apply_theme
             from PyQt5.QtWidgets import QApplication
             apply_theme(QApplication.instance(), self.db)
+            # Re-render current chat with new colors
+            if self.current_chat_id is not None:
+                self.chat.load_messages(self.db.get_messages(self.current_chat_id))
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():

@@ -306,6 +306,8 @@ def apply_theme(app, db):
         widget.setStyleSheet("")  # clear any window-level overrides
         widget.update()
 
-    # Store animations flag globally for animated widgets to check
+    # Store theme flags globally for chat widget HTML rendering
     import builtins
     builtins._quadrogent_animations = anims
+    builtins._quadrogent_theme = theme
+    builtins._quadrogent_accent = accent

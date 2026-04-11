@@ -23,8 +23,56 @@ from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPropertyAnimation, QEasi
 from PyQt5.QtWidgets import QGraphicsOpacityEffect
 from PyQt5.QtGui import QDesktopServices, QKeyEvent
 
-from src.ui.styles import MESSAGE_CSS
+from src.ui.styles import MESSAGE_CSS as _MESSAGE_CSS_DARK
 from src.ui.icon_helper import apply_icon, get_icon
+
+
+def _message_css() -> str:
+    """Return MESSAGE_CSS tuned to current theme."""
+    import builtins
+    if getattr(builtins, "_quadrogent_theme", "dark") == "light":
+        return """
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #f5f5f5;
+    color: #222222;
+    font-family: "Roboto", "Inter", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 16px 0 12px 0;
+}
+table { border-collapse: collapse; }
+a { color: #1a5fa8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+    font-family: "JetBrains Mono", "Consolas", monospace;
+    font-size: 12.5px; color: #7c6020;
+    background: #e4e4e4; border: 1px solid #cccccc;
+    padding: 2px 5px; border-radius: 4px;
+}
+pre {
+    background: #eeeeee; border: 1px solid #cccccc;
+    padding: 12px 14px; border-radius: 7px;
+    font-size: 12.5px; white-space: pre-wrap; word-wrap: break-word;
+    font-family: "JetBrains Mono", "Consolas", monospace; color: #334155;
+    margin: 8px 0;
+}
+pre code { background: none; border: none; padding: 0; }
+h1,h2,h3,h4,h5,h6 { color: #111111; font-weight: 600; margin: 14px 0 5px 0; }
+h1 { font-size: 18px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
+strong { color: #111111; font-weight: 600; }
+em { font-style: italic; color: #555555; }
+ul, ol { padding-left: 20px; margin: 5px 0; }
+li { margin: 3px 0; color: #333333; }
+hr { border: none; border-top: 1px solid #cccccc; margin: 10px 0; }
+blockquote {
+    border-left: 2px solid #aaaaaa; padding: 4px 12px;
+    color: #666666; margin: 8px 0; font-style: italic;
+}
+</style>
+"""
+    return _MESSAGE_CSS_DARK
 from PyQt5.QtCore import QSize as _QSize
 
 
@@ -33,20 +81,23 @@ from PyQt5.QtCore import QSize as _QSize
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Palette constants
-C = {
+# Theme-aware palettes for chat HTML rendering
+_DARK_PALETTE = {
     "user_bg":       "#181818",
     "user_border":   "#2a2a2a",
     "user_text":     "#ededed",
     "asst_text":     "#c4c4c4",
+    "body_bg":       "#0a0a0a",
+    "body_text":     "#c4c4c4",
     "avatar_bg":     "#0e0e0e",
     "avatar_border": "#1e1e1e",
     "avatar_text":   "#303030",
-    "tool_name":     "#282828",
+    "tool_name":     "#444444",
     "tool_ok":       "#2a5530",
     "tool_err":      "#632020",
     "tool_body_bg":  "#080808",
     "tool_body_bd":  "#131313",
-    "tool_body_txt": "#363636",
+    "tool_body_txt": "#555555",
     "ec_ok_bg":      "#0a160b",
     "ec_ok_bd":      "#143418",
     "ec_ok_txt":     "#27502c",
@@ -59,7 +110,7 @@ C = {
     "code_bg":       "#0b0b0b",
     "code_bd":       "#161616",
     "code_lang_bg":  "#0e0e0e",
-    "code_lang_txt": "#2e2e2e",
+    "code_lang_txt": "#555555",
     "code_txt":      "#9ca3af",
     "inline_code_bg": "#141414",
     "inline_code_bd": "#1e1e1e",
@@ -74,9 +125,78 @@ C = {
     "chip_name":     "#b8b8b8",
     "chip_ext":      "#343434",
     "cursor":        "#363636",
-    "dot1":          "#222222",
+    "dot1":          "#333333",
     "dot_active":    "#999999",
 }
+
+_LIGHT_PALETTE = {
+    "user_bg":       "#e8e8e8",
+    "user_border":   "#cccccc",
+    "user_text":     "#111111",
+    "asst_text":     "#222222",
+    "body_bg":       "#f5f5f5",
+    "body_text":     "#222222",
+    "avatar_bg":     "#e0e0e0",
+    "avatar_border": "#bbbbbb",
+    "avatar_text":   "#666666",
+    "tool_name":     "#555555",
+    "tool_ok":       "#1a6b28",
+    "tool_err":      "#8b2020",
+    "tool_body_bg":  "#eeeeee",
+    "tool_body_bd":  "#cccccc",
+    "tool_body_txt": "#444444",
+    "ec_ok_bg":      "#d4f0d8",
+    "ec_ok_bd":      "#88c890",
+    "ec_ok_txt":     "#1a5c22",
+    "ec_err_bg":     "#fce8e8",
+    "ec_err_bd":     "#e08080",
+    "ec_err_txt":    "#8b2020",
+    "error_text":    "#cc2020",
+    "error_border":  "#cc6060",
+    "error_bg":      "#fff0f0",
+    "code_bg":       "#eeeeee",
+    "code_bd":       "#cccccc",
+    "code_lang_bg":  "#e0e0e0",
+    "code_lang_txt": "#888888",
+    "code_txt":      "#334155",
+    "inline_code_bg": "#e4e4e4",
+    "inline_code_bd": "#cccccc",
+    "inline_code_txt": "#7c6020",
+    "fc_bg":         "#f0f0f0",
+    "fc_bd":         "#cccccc",
+    "fc_name":       "#222222",
+    "fc_meta":       "#666666",
+    "fc_link":       "#1a5fa8",
+    "chip_bg":       "#e8e8e8",
+    "chip_bd":       "#cccccc",
+    "chip_name":     "#333333",
+    "chip_ext":      "#888888",
+    "cursor":        "#aaaaaa",
+    "dot1":          "#cccccc",
+    "dot_active":    "#555555",
+}
+
+
+def _get_palette() -> dict:
+    """Return current theme palette."""
+    try:
+        import builtins
+        if getattr(builtins, "_quadrogent_theme", "dark") == "light":
+            return _LIGHT_PALETTE
+    except Exception:
+        pass
+    return _DARK_PALETTE
+
+
+# C is now a dynamic proxy — always reads from current theme
+class _Palette:
+    def __getitem__(self, key):
+        return _get_palette()[key]
+    def get(self, key, default=None):
+        return _get_palette().get(key, default)
+
+
+C = _Palette()
 
 FONT = '"Inter","Segoe UI",system-ui,sans-serif'
 MONO = '"JetBrains Mono","Consolas",monospace'
@@ -985,7 +1105,7 @@ class ChatWidget(QWidget):
         self.browser.anchorClicked.connect(self._on_link_clicked)
         self.browser.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.browser.setHtml(MESSAGE_CSS + "<body></body>")
+        self.browser.setHtml(_message_css() + "<body></body>")
         layout.addWidget(self.browser, 1)
 
         # ── Agent status bar ──────────────────────────────
@@ -1396,7 +1516,7 @@ class ChatWidget(QWidget):
                 f'{tc_esc}</div>'
             )
         block = _asst_bubble(think_html + escaped + cursor_span)
-        self.browser.setHtml(MESSAGE_CSS + f"<body>{self._streaming_base}{block}</body>")
+        self.browser.setHtml(_message_css() + f"<body>{self._streaming_base}{block}</body>")
         self._scroll_bottom()
 
     def end_stream(self):
@@ -1494,7 +1614,7 @@ class ChatWidget(QWidget):
 
     def _render(self, no_scroll: bool = False):
         extra = _thinking_row(self._think_frame) if self._is_thinking else ""
-        html = MESSAGE_CSS + f"<body>{self._messages_html}{extra}</body>"
+        html = _message_css() + f"<body>{self._messages_html}{extra}</body>"
         anims_on = getattr(__import__("builtins"), "_quadrogent_animations", True)
         if self._fade_next and anims_on:
             self._fade_next = False
@@ -1516,7 +1636,7 @@ class ChatWidget(QWidget):
             self._scroll_bottom()
 
     def _render_with_thinking(self):
-        self.browser.setHtml(MESSAGE_CSS + f"<body>{self._messages_html}{_thinking_row(self._think_frame)}</body>")
+        self.browser.setHtml(_message_css() + f"<body>{self._messages_html}{_thinking_row(self._think_frame)}</body>")
         self._scroll_bottom()
 
     def _scroll_bottom(self):
