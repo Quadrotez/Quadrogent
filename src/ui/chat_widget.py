@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
     QTextEdit, QPushButton, QLabel, QFileDialog,
     QSizePolicy, QMenu, QComboBox, QApplication,
-    QDialog, QListWidget,
+    QDialog, QListWidget, QLineEdit,
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import QGraphicsOpacityEffect
