@@ -364,7 +364,7 @@ class AppSettingsDialog(QDialog):
                 f"color:{'#5a9a5a' if is_running else '#555'};font-size:10px;"
             )
             self._provider_settings_vl.addWidget(self._g4f_status)
-            note2 = QLabel("Требует: pip install g4f")
+            note2 = QLabel("Требует: pip install g4f[api]")
             note2.setStyleSheet("color:#404040;font-size:10px;")
             self._provider_settings_vl.addWidget(note2)
         elif pid == "openrouter":
@@ -389,22 +389,43 @@ class AppSettingsDialog(QDialog):
         if AppSettingsDialog._g4f_process and AppSettingsDialog._g4f_process.poll() is None:
             self._g4f_status.setText("Статус: уже запущен")
             return
+
+        # Check if uvicorn (required by g4f[api]) is available; install if not
         try:
+            import uvicorn  # noqa
+        except ImportError:
+            self._g4f_status.setText("Устанавливаю g4f[api]… подождите")
+            self._g4f_status.setStyleSheet("color:#ca9a38;font-size:10px;")
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()
+            try:
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "g4f[api]", "-q"],
+                    timeout=120
+                )
+            except Exception as e:
+                self._g4f_status.setText(f"✗ Не удалось установить: {e}")
+                self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
+                return
+
+        try:
+            import tempfile, os
+            log_file = open(os.path.join(tempfile.gettempdir(), "g4f_api.log"), "w")
             proc = subprocess.Popen(
                 [sys.executable, "-m", "g4f", "api", "--port", "1337"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
             )
             AppSettingsDialog._g4f_process = proc
+            AppSettingsDialog._g4f_logfile = log_file
             self._g4f_launch_btn.setEnabled(False)
             self._g4f_stop_btn.setEnabled(True)
-            self._g4f_status.setText("Статус: запускается… (порт 1337)")
-            self._g4f_status.setStyleSheet("color:#5a9a5a;font-size:10px;")
-            # Check after 3 seconds
+            self._g4f_status.setText("Запускается… (порт 1337)")
+            self._g4f_status.setStyleSheet("color:#ca9a38;font-size:10px;")
             from PyQt5.QtCore import QTimer
-            QTimer.singleShot(3000, self._check_g4f_status)
-        except FileNotFoundError:
-            self._g4f_status.setText("✗ g4f не установлен. pip install g4f")
+            QTimer.singleShot(4000, self._check_g4f_status)
+        except Exception as e:
+            self._g4f_status.setText(f"✗ Ошибка запуска: {e}")
             self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
 
     def _stop_g4f(self):
@@ -436,7 +457,18 @@ class AppSettingsDialog(QDialog):
                 pass
             self._g4f_status.setText("Запускается… подождите")
         else:
-            self._g4f_status.setText("✗ Процесс завершился с ошибкой")
+            # Read last lines from log for diagnosis
+            log_tail = ""
+            try:
+                import tempfile, os
+                lf = os.path.join(tempfile.gettempdir(), "g4f_api.log")
+                with open(lf) as f:
+                    lines = f.readlines()
+                    log_tail = " | ".join(l.strip() for l in lines[-3:] if l.strip())
+            except Exception:
+                pass
+            err_msg = f"✗ Ошибка: {log_tail[:120]}" if log_tail else "✗ Процесс завершился"
+            self._g4f_status.setText(err_msg)
             self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
             if hasattr(self, "_g4f_launch_btn"):
                 self._g4f_launch_btn.setEnabled(True)
