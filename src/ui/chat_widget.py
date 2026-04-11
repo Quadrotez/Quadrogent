@@ -343,7 +343,7 @@ def _tool_row(tool_name: str, exit_code, body: str) -> str:
         f'<td>'
         f'<div style="font-size:9.5px;text-transform:uppercase;letter-spacing:1.4px;'
         f'font-family:{MONO};color:{name_color};margin-bottom:3px;">'
-        f'{html.escape(tool_name)}{badge}</div>'
+        f'{html.escape(str(tool_name or "tool"))}{badge}</div>'
         f'<div style="background:{C["tool_body_bg"]};border:1px solid {C["tool_body_bd"]};'
         f'border-radius:5px;padding:7px 12px;font-family:{MONO};font-size:11.5px;'
         f'color:{C["tool_body_txt"]};white-space:pre-wrap;word-wrap:break-word;'
@@ -711,8 +711,9 @@ class ModelPickerDialog(QDialog):
     """Modal model picker with live search."""
     model_selected = pyqtSignal(str)
 
-    def __init__(self, models: list, current: str, parent=None):
+    def __init__(self, models: list, current: str, parent=None, vision_ids: set | None = None):
         super().__init__(parent)
+        self._vision_ids = vision_ids or set()
         self.setWindowTitle("Выбор модели")
         self.setMinimumSize(500, 400)
         self.setStyleSheet(
@@ -758,7 +759,10 @@ class ModelPickerDialog(QDialog):
         self._list.clear()
         for m in models:
             from PyQt5.QtWidgets import QListWidgetItem
-            item = QListWidgetItem(m)
+            vision_ids = getattr(self, "_vision_ids", set())
+            label = ("👁 " if m in vision_ids else "   ") + m
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, m)  # store actual model id
             self._list.addItem(item)
             if m == current:
                 self._list.setCurrentItem(item)
@@ -771,7 +775,9 @@ class ModelPickerDialog(QDialog):
     def _pick(self):
         item = self._list.currentItem()
         if item:
-            self.model_selected.emit(item.text())
+            # UserRole has clean id; fall back to stripping prefix from text
+            mid = item.data(Qt.UserRole) or item.text().lstrip("👁 ").strip()
+            self.model_selected.emit(mid)
             self.accept()
 
 
@@ -812,19 +818,35 @@ class ModelSelector(QWidget):
 
     def _open_picker(self):
         all_m = self._seen if self._seen else self._loaded
-        dlg = ModelPickerDialog(all_m, self._current, self)
+        vision_ids = getattr(self, "_vision_ids", set())
+        dlg = ModelPickerDialog(all_m, self._current, self, vision_ids=vision_ids)
         dlg.model_selected.connect(self._select)
         dlg.exec_()
 
     def _select(self, model_id: str):
         if model_id != self._current:
             self._current = model_id
-            self._btn.setText(model_id)
+            self._update_btn_label()
             self.model_changed.emit(model_id)
 
-    def set_models(self, loaded: list, seen: list):
+    def set_models(self, loaded: list, seen: list, vision_ids: set | None = None):
         self._loaded = loaded
         self._seen = seen
+        self._vision_ids = vision_ids or set()
+        # Refresh label if current model vision status changed
+        self._update_btn_label()
+
+    def _update_btn_label(self):
+        mid = self._current
+        if not mid:
+            self._btn.setText("—")
+            return
+        is_vision = mid in getattr(self, "_vision_ids", set())
+        icon_str = " 👁" if is_vision else ""
+        self._btn.setText(mid + icon_str)
+        self._btn.setToolTip(
+            f"Модель: {mid}\n{'✓ Поддерживает изображения' if is_vision else '✗ Изображения не поддерживаются'}"
+        )
 
     def current_model(self):
         return self._current
@@ -1599,6 +1621,8 @@ class ChatWidget(QWidget):
         self._render()
 
     def _append_tool(self, tool_name: str, content: str, ts: str = "", _record: bool = True):
+        tool_name = str(tool_name or "tool")
+        content = str(content or "")
         ec_match = re.search(r'\[exit code:\s*(-?\d+)\]', content)
         exit_code = int(ec_match.group(1)) if ec_match else None
         body = re.sub(r'^\[exit code:\s*-?\d+\]\n?', '', content).strip()

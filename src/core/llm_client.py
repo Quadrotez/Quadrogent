@@ -289,6 +289,28 @@ class LLMClient:
         except Exception:
             return []
 
+    def get_models_with_meta(self) -> list[dict]:
+        """Return list of {id, vision} dicts. Vision detected by name heuristics."""
+        try:
+            r = self.session.get(f"{self.base_url}/models", timeout=5)
+            models = []
+            for m in r.json().get("data", []):
+                mid = m.get("id", "")
+                # Vision heuristic: common keywords in model names
+                vision_keywords = ("vl", "vision", "visual", "llava", "minicpm",
+                                   "qwen2-vl", "qwen2.5-vl", "pixtral", "phi-3-vision",
+                                   "gemma-vision", "claude-3", "gpt-4-vision",
+                                   "idefics", "cogvlm", "internvl", "molmo")
+                has_vision = any(kw in mid.lower() for kw in vision_keywords)
+                # Also check model metadata if LM Studio provides it
+                props = m.get("props", {}) or {}
+                if props.get("vision") or props.get("multimodal"):
+                    has_vision = True
+                models.append({"id": mid, "vision": has_vision})
+            return models
+        except Exception:
+            return []
+
     def chat(
         self,
         messages: list[dict],

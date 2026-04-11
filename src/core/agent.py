@@ -91,8 +91,8 @@ EXECUTE EVERY STEP until the task is DONE.
 14. ⚠️ FILE PATHS — ALWAYS use DOUBLE QUOTES around ANY path in /workspace/:
     CORRECT:   cat "/workspace/Текстовый файл.txt"
     CORRECT:   stat "/workspace/madk1d - давно.mp3"
-    WRONG:     cat /workspace/Текстовый\ файл.txt
-    WRONG:     cat /workspace/madk1d\ -\ давно.mp3
+    WRONG:     cat /workspace/Текстовый ПРОБЕЛ файл.txt
+    WRONG:     cat /workspace/madk1d-davno.mp3  (missing quotes)
     This is MANDATORY for ALL filenames, especially those with spaces, Cyrillic, or special chars.
     When in doubt: ls /workspace/ | head -20  to see the exact filename, then quote it.
 

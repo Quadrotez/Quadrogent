@@ -396,7 +396,13 @@ class MainWindow(QMainWindow):
             if m not in seen:
                 seen.append(m)
         self.db.set_setting("seen_models", json.dumps(seen))
-        self.chat.model_selector.set_models(loaded, seen)
+        # Get vision metadata
+        try:
+            meta = self.agent.llm.get_models_with_meta()
+            vision_ids = {m["id"] for m in meta if m.get("vision")}
+        except Exception:
+            vision_ids = set()
+        self.chat.model_selector.set_models(loaded, seen, vision_ids=vision_ids)
         saved_model = self.db.get_setting("current_model", "")
         if saved_model:
             self.chat.model_selector.set_current_model(saved_model)
@@ -873,6 +879,11 @@ a{{color:#6a9fd8;text-decoration:none}}
             # Re-render current chat with new colors
             if self.current_chat_id is not None:
                 self.chat.load_messages(self.db.get_messages(self.current_chat_id))
+            # Update browser background to match theme
+            import builtins
+            theme = getattr(builtins, "_quadrogent_theme", "dark")
+            bg = "#f5f5f5" if theme == "light" else "#0a0a0a"
+            self.chat.browser.setStyleSheet(f"background:{bg};border:none;")
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
