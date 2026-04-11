@@ -311,14 +311,15 @@ class AppSettingsDialog(QDialog):
             self._api_key_edit = QLineEdit("")
             self._api_key_edit.setVisible(False)
 
-        # URL override field
+        # URL field — show provider's default, allow override
         url_lbl = QLabel("URL API:")
         url_lbl.setStyleSheet("color:#888;font-size:11px;")
         self._provider_settings_vl.addWidget(url_lbl)
         default_url = info.get("base_url", "")
-        saved_url = self.db.get_setting("lm_studio_url", default_url)
-        # Only pre-fill if it looks like it belongs to this provider
-        cur_url = saved_url if saved_url else ""
+        saved_url = self.db.get_setting("lm_studio_url", "")
+        saved_provider = self.db.get_setting("api_provider", "lmstudio")
+        # Use saved URL only if it's for the same provider, else use the default
+        cur_url = saved_url if (saved_provider == pid and saved_url) else default_url
         self._api_url_edit = QLineEdit(cur_url)
         self._api_url_edit.setPlaceholderText(default_url or "https://...")
         self._provider_settings_vl.addWidget(self._api_url_edit)
@@ -329,9 +330,43 @@ class AppSettingsDialog(QDialog):
             note.setStyleSheet("color:#606060;font-size:10px;")
             self._provider_settings_vl.addWidget(note)
         elif pid == "gpt4free":
-            note = QLabel("Запустите: pip install g4f  &&  python -m g4f api")
-            note.setStyleSheet("color:#606060;font-size:10px;")
-            self._provider_settings_vl.addWidget(note)
+            g4f_row = QHBoxLayout()
+            self._g4f_launch_btn = QPushButton("▶  Запустить g4f API")
+            self._g4f_launch_btn.setStyleSheet(
+                "QPushButton{background:#0a1a0a;border:1px solid #1a3a1a;"
+                "border-radius:5px;color:#5a9a5a;font-size:11px;padding:4px 12px;}"
+                "QPushButton:hover{background:#0f240f;color:#7acc7a;}"
+                "QPushButton:disabled{color:#2a4a2a;border-color:#111;}"
+            )
+            # Reflect current process state
+            proc = AppSettingsDialog._g4f_process
+            is_running = proc is not None and proc.poll() is None
+            self._g4f_launch_btn.setEnabled(not is_running)
+            self._g4f_launch_btn.clicked.connect(self._launch_g4f)
+            g4f_row.addWidget(self._g4f_launch_btn)
+
+            self._g4f_stop_btn = QPushButton("■  Остановить")
+            self._g4f_stop_btn.setStyleSheet(
+                "QPushButton{background:#1a0a0a;border:1px solid #3a1a1a;"
+                "border-radius:5px;color:#9a5a5a;font-size:11px;padding:4px 12px;}"
+                "QPushButton:hover{background:#240f0f;color:#cc7a7a;}"
+                "QPushButton:disabled{color:#3a1a1a;border-color:#111;}"
+            )
+            self._g4f_stop_btn.setEnabled(is_running)
+            self._g4f_stop_btn.clicked.connect(self._stop_g4f)
+            g4f_row.addWidget(self._g4f_stop_btn)
+            self._provider_settings_vl.addLayout(g4f_row)
+
+            self._g4f_status = QLabel(
+                "✓ Работает" if is_running else "Статус: не запущен"
+            )
+            self._g4f_status.setStyleSheet(
+                f"color:{'#5a9a5a' if is_running else '#555'};font-size:10px;"
+            )
+            self._provider_settings_vl.addWidget(self._g4f_status)
+            note2 = QLabel("Требует: pip install g4f")
+            note2.setStyleSheet("color:#404040;font-size:10px;")
+            self._provider_settings_vl.addWidget(note2)
         elif pid == "openrouter":
             note = QLabel("Заголовки HTTP-Referer и X-Title добавляются автоматически.")
             note.setStyleSheet("color:#606060;font-size:10px;")
