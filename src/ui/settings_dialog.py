@@ -161,7 +161,6 @@ class AppSettingsDialog(QDialog):
         tabs = QTabWidget()
 
         tabs.addTab(self._tab_connection(), "Подключение")
-        tabs.addTab(self._tab_provider(),    "Провайдер")
         tabs.addTab(self._tab_prompts(),    "Промпты")
         tabs.addTab(self._tab_profile(),    "Профиль")
         tabs.addTab(self._tab_memory(),     "Память")
@@ -181,27 +180,61 @@ class AppSettingsDialog(QDialog):
         btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
 
-    # ── Tab: Подключение ───────────────────────────────────────────────────────
+    # ── Tab: Подключение + Провайдер (объединённый) ─────────────────────────────
 
     def _tab_connection(self) -> QWidget:
+        from src.core.llm_client import PROVIDERS
         w = QWidget()
-        fl = QFormLayout(w)
-        fl.setSpacing(12)
-        fl.setContentsMargins(16, 16, 16, 16)
+        scroll_area = __import__('PyQt5.QtWidgets', fromlist=['QScrollArea']).QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea{border:none;}")
+        inner = QWidget()
+        vl = QVBoxLayout(inner)
+        vl.setContentsMargins(16, 16, 16, 16)
+        vl.setSpacing(14)
 
-        self.url_edit = QLineEdit(
-            self.db.get_setting("lm_studio_url", "http://localhost:1234/v1"))
-        fl.addRow("LM Studio URL:", self.url_edit)
+        # ── Провайдер ────────────────────────────────────
+        vl.addWidget(self._section_label("Провайдер"))
+        self._provider_combo = QComboBox()
+        for pid, info in PROVIDERS.items():
+            self._provider_combo.addItem(info["name"], pid)
+        saved_p = self.db.get_setting("api_provider", "lmstudio")
+        idx_p = next((i for i in range(self._provider_combo.count())
+                      if self._provider_combo.itemData(i) == saved_p), 0)
+        self._provider_combo.setCurrentIndex(idx_p)
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        vl.addWidget(self._provider_combo)
 
+        self._provider_hint = QLabel("")
+        self._provider_hint.setStyleSheet("color:#606060;font-size:11px;")
+        self._provider_hint.setWordWrap(True)
+        vl.addWidget(self._provider_hint)
+
+        # ── Адаптивный блок настроек провайдера ──────────
+        self._provider_settings_stack = QWidget()
+        self._provider_settings_vl = QVBoxLayout(self._provider_settings_stack)
+        self._provider_settings_vl.setContentsMargins(0, 0, 0, 0)
+        self._provider_settings_vl.setSpacing(8)
+        vl.addWidget(self._provider_settings_stack)
+
+        # ── Общие параметры ───────────────────────────────
+        vl.addWidget(self._section_label("Параметры"))
+
+        fl = __import__('PyQt5.QtWidgets', fromlist=['QFormLayout']).QFormLayout()
+        fl.setSpacing(8)
         self.temp_edit = QLineEdit(self.db.get_setting("temperature", "0.7"))
         fl.addRow("Temperature:", self.temp_edit)
+        vl.addLayout(fl)
+
+        fl2 = __import__('PyQt5.QtWidgets', fromlist=['QFormLayout']).QFormLayout()
+        fl2.setSpacing(8)
 
         self.title_combo = QComboBox()
         self.title_combo.addItem("Первые 4 слова (быстро)", "words")
         self.title_combo.addItem("Генерация через AI",     "ai")
         saved = self.db.get_setting("title_mode", "words")
         self.title_combo.setCurrentIndex(0 if saved == "words" else 1)
-        fl.addRow("Название чата:", self.title_combo)
+        fl2.addRow("Название чата:", self.title_combo)
 
         self.lang_combo = QComboBox()
         langs = [
@@ -215,50 +248,10 @@ class AppSettingsDialog(QDialog):
         saved_lang = self.db.get_setting("language", "auto")
         idx = next((i for i, (_, c) in enumerate(langs) if c == saved_lang), 0)
         self.lang_combo.setCurrentIndex(idx)
-        fl.addRow("Язык ответов:", self.lang_combo)
+        fl2.addRow("Язык ответов:", self.lang_combo)
+        vl.addLayout(fl2)
 
-        return w
-
-    # ── Tab: Провайдер ────────────────────────────────────────────────────────────
-
-    def _tab_provider(self) -> QWidget:
-        from src.core.llm_client import PROVIDERS
-        w = QWidget()
-        vl = QVBoxLayout(w)
-        vl.setContentsMargins(16, 16, 16, 16)
-        vl.setSpacing(12)
-
-        vl.addWidget(QLabel("Провайдер:"))
-        self._provider_combo = QComboBox()
-        for pid, info in PROVIDERS.items():
-            self._provider_combo.addItem(info["name"], pid)
-        saved_p = self.db.get_setting("api_provider", "lmstudio")
-        idx_p = next((i for i in range(self._provider_combo.count())
-                      if self._provider_combo.itemData(i) == saved_p), 0)
-        self._provider_combo.setCurrentIndex(idx_p)
-        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
-        vl.addWidget(self._provider_combo)
-
-        self._provider_hint = QLabel("")
-        self._provider_hint.setStyleSheet("color:#555;font-size:11px;")
-        self._provider_hint.setWordWrap(True)
-        vl.addWidget(self._provider_hint)
-
-        vl.addWidget(QLabel("API-ключ:"))
-        self._api_key_edit = QLineEdit(self.db.get_setting("api_key", ""))
-        self._api_key_edit.setPlaceholderText("Вставьте API-ключ (если нужен)")
-        self._api_key_edit.setEchoMode(QLineEdit.Password)
-        vl.addWidget(self._api_key_edit)
-
-        show_key_btn = QPushButton("Показать/скрыть ключ")
-        show_key_btn.clicked.connect(self._toggle_key_visibility)
-        vl.addWidget(show_key_btn)
-
-        vl.addWidget(QLabel("URL API (оставьте пустым для дефолтного):"))
-        self._api_url_edit = QLineEdit(self.db.get_setting("lm_studio_url", "http://localhost:1234/v1"))
-        self._api_url_edit.setPlaceholderText("http://localhost:1234/v1")
-        vl.addWidget(self._api_url_edit)
-
+        # ── Проверка подключения ──────────────────────────
         test_btn = QPushButton("Проверить подключение")
         test_btn.clicked.connect(self._test_connection)
         vl.addWidget(test_btn)
@@ -267,47 +260,184 @@ class AppSettingsDialog(QDialog):
         vl.addWidget(self._test_result)
 
         vl.addStretch()
+        scroll_area.setWidget(inner)
+
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll_area)
+
+        # Build initial provider widgets
         self._on_provider_changed(self._provider_combo.currentIndex())
         return w
+
+    def _section_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "color:#aaaaaa;font-size:11px;font-weight:600;letter-spacing:0.8px;"
+            "text-transform:uppercase;margin-top:4px;"
+        )
+        return lbl
 
     def _on_provider_changed(self, idx: int):
         from src.core.llm_client import PROVIDERS
         pid = self._provider_combo.itemData(idx)
         info = PROVIDERS.get(pid, {})
-        hint = info.get("hint", "")
-        self._provider_hint.setText(hint)
-        needs_key = info.get("needs_key", False)
-        self._api_key_edit.setEnabled(needs_key)
-        # Pre-fill URL if it's still the old default
+        self._provider_hint.setText(info.get("hint", ""))
+
+        # Clear old provider widgets
+        while self._provider_settings_vl.count():
+            item = self._provider_settings_vl.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # API key field (if needed)
+        if info.get("needs_key", False):
+            key_lbl = QLabel("API-ключ:")
+            key_lbl.setStyleSheet("color:#888;font-size:11px;")
+            self._provider_settings_vl.addWidget(key_lbl)
+
+            key_row = QHBoxLayout()
+            self._api_key_edit = QLineEdit(self.db.get_setting("api_key", ""))
+            self._api_key_edit.setPlaceholderText("sk-...")
+            self._api_key_edit.setEchoMode(QLineEdit.Password)
+            key_row.addWidget(self._api_key_edit)
+            eye_btn = QPushButton("👁")
+            eye_btn.setFixedSize(32, 32)
+            eye_btn.setStyleSheet("QPushButton{background:transparent;border:1px solid #222;border-radius:5px;font-size:13px;}")
+            eye_btn.clicked.connect(self._toggle_key_visibility)
+            key_row.addWidget(eye_btn)
+            self._provider_settings_vl.addLayout(key_row)
+        else:
+            self._api_key_edit = QLineEdit("")
+            self._api_key_edit.setVisible(False)
+
+        # URL override field
+        url_lbl = QLabel("URL API:")
+        url_lbl.setStyleSheet("color:#888;font-size:11px;")
+        self._provider_settings_vl.addWidget(url_lbl)
         default_url = info.get("base_url", "")
-        if default_url:
-            self._api_url_edit.setPlaceholderText(default_url)
+        saved_url = self.db.get_setting("lm_studio_url", default_url)
+        # Only pre-fill if it looks like it belongs to this provider
+        cur_url = saved_url if saved_url else ""
+        self._api_url_edit = QLineEdit(cur_url)
+        self._api_url_edit.setPlaceholderText(default_url or "https://...")
+        self._provider_settings_vl.addWidget(self._api_url_edit)
+
+        # Provider-specific extras
+        if pid == "lmstudio":
+            note = QLabel("Убедитесь, что LM Studio запущен и сервер активен.")
+            note.setStyleSheet("color:#606060;font-size:10px;")
+            self._provider_settings_vl.addWidget(note)
+        elif pid == "gpt4free":
+            note = QLabel("Запустите: pip install g4f  &&  python -m g4f api")
+            note.setStyleSheet("color:#606060;font-size:10px;")
+            self._provider_settings_vl.addWidget(note)
+        elif pid == "openrouter":
+            note = QLabel("Заголовки HTTP-Referer и X-Title добавляются автоматически.")
+            note.setStyleSheet("color:#606060;font-size:10px;")
+            self._provider_settings_vl.addWidget(note)
+
+        # Default models hint
+        default_models = info.get("default_models", [])
+        if default_models:
+            models_lbl = QLabel("Популярные модели: " + ", ".join(default_models[:3]))
+            models_lbl.setStyleSheet("color:#505050;font-size:10px;")
+            models_lbl.setWordWrap(True)
+            self._provider_settings_vl.addWidget(models_lbl)
+
+    # ── GPT4Free process management ───────────────────────────────────────────
+
+    _g4f_process = None  # class-level so it survives tab switches
+
+    def _launch_g4f(self):
+        import subprocess, sys
+        if AppSettingsDialog._g4f_process and AppSettingsDialog._g4f_process.poll() is None:
+            self._g4f_status.setText("Статус: уже запущен")
+            return
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "g4f", "api", "--port", "1337"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            AppSettingsDialog._g4f_process = proc
+            self._g4f_launch_btn.setEnabled(False)
+            self._g4f_stop_btn.setEnabled(True)
+            self._g4f_status.setText("Статус: запускается… (порт 1337)")
+            self._g4f_status.setStyleSheet("color:#5a9a5a;font-size:10px;")
+            # Check after 3 seconds
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(3000, self._check_g4f_status)
+        except FileNotFoundError:
+            self._g4f_status.setText("✗ g4f не установлен. pip install g4f")
+            self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
+
+    def _stop_g4f(self):
+        proc = AppSettingsDialog._g4f_process
+        if proc and proc.poll() is None:
+            proc.terminate()
+            AppSettingsDialog._g4f_process = None
+        if hasattr(self, "_g4f_launch_btn"):
+            self._g4f_launch_btn.setEnabled(True)
+            self._g4f_stop_btn.setEnabled(False)
+            self._g4f_status.setText("Статус: остановлен")
+            self._g4f_status.setStyleSheet("color:#555;font-size:10px;")
+
+    def _check_g4f_status(self):
+        proc = AppSettingsDialog._g4f_process
+        if not hasattr(self, "_g4f_status"):
+            return
+        if proc and proc.poll() is None:
+            # Try to connect
+            try:
+                import requests
+                r = requests.get("http://localhost:1337/v1/models", timeout=2)
+                if r.status_code == 200:
+                    n = len(r.json().get("data", []))
+                    self._g4f_status.setText(f"✓ Работает — {n} моделей на порту 1337")
+                    self._g4f_status.setStyleSheet("color:#5a9a5a;font-size:10px;")
+                    return
+            except Exception:
+                pass
+            self._g4f_status.setText("Запускается… подождите")
+        else:
+            self._g4f_status.setText("✗ Процесс завершился с ошибкой")
+            self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
+            if hasattr(self, "_g4f_launch_btn"):
+                self._g4f_launch_btn.setEnabled(True)
+                self._g4f_stop_btn.setEnabled(False)
 
     def _toggle_key_visibility(self):
-        if self._api_key_edit.echoMode() == QLineEdit.Password:
-            self._api_key_edit.setEchoMode(QLineEdit.Normal)
-        else:
-            self._api_key_edit.setEchoMode(QLineEdit.Password)
+        if hasattr(self, "_api_key_edit"):
+            if self._api_key_edit.echoMode() == QLineEdit.Password:
+                self._api_key_edit.setEchoMode(QLineEdit.Normal)
+            else:
+                self._api_key_edit.setEchoMode(QLineEdit.Password)
 
     def _test_connection(self):
         from src.core.llm_client import LLMClient, PROVIDERS
         pid = self._provider_combo.currentData()
         info = PROVIDERS.get(pid, {})
-        key = self._api_key_edit.text().strip()
-        url = self._api_url_edit.text().strip() or info.get("base_url", "")
+        key = self._api_key_edit.text().strip() if hasattr(self, "_api_key_edit") else ""
+        url = self._api_url_edit.text().strip() if hasattr(self, "_api_url_edit") else ""
+        url = url or info.get("base_url", "")
+        self._test_result.setText("Проверяю…")
+        self._test_result.setStyleSheet("color:#888;")
+        __import__('PyQt5.QtWidgets', fromlist=['QApplication']).QApplication.processEvents()
         try:
             client = LLMClient(base_url=url, api_key=key)
             models = client.get_models()
             if models:
-                self._test_result.setText(f"✓ Подключено. Моделей: {len(models)}")
+                self._test_result.setText(f"✓ OK — {len(models)} модел(и/ей) доступно")
                 self._test_result.setStyleSheet("color:#4a9a5a;")
             else:
-                self._test_result.setText("⚠ Подключено, но моделей нет.")
+                self._test_result.setText("⚠ Подключено, но моделей не найдено")
                 self._test_result.setStyleSheet("color:#ca9a38;")
         except Exception as e:
-            self._test_result.setText(f"✗ Ошибка: {e}")
+            self._test_result.setText(f"✗ {e}")
             self._test_result.setStyleSheet("color:#da4848;")
 
+    # ── Tab: Промпты ──────────────────────────────────────────────────────────
     # ── Tab: Промпты ──────────────────────────────────────────────────────────
 
     def _tab_prompts(self) -> QWidget:
@@ -588,8 +718,17 @@ class AppSettingsDialog(QDialog):
     # ── Save ───────────────────────────────────────────────────────────────────
 
     def _save(self):
+        # ── Провайдер + URL + ключ ────────────────────────
+        from src.core.llm_client import PROVIDERS as _P
+        pid = self._provider_combo.currentData()
+        self.db.set_setting("api_provider", pid)
+        api_key = self._api_key_edit.text().strip() if hasattr(self, "_api_key_edit") else ""
+        self.db.set_setting("api_key", api_key)
+        custom_url = self._api_url_edit.text().strip() if hasattr(self, "_api_url_edit") else ""
+        final_url = custom_url or _P.get(pid, {}).get("base_url", "http://localhost:1234/v1")
+        self.db.set_setting("lm_studio_url", final_url)
+
         # ── Подключение ──────────────────────────────────
-        self.db.set_setting("lm_studio_url", self.url_edit.text().strip())
         self.db.set_setting("temperature",   self.temp_edit.text().strip())
         self.db.set_setting("title_mode",    self.title_combo.currentData())
         self.db.set_setting("language",      self.lang_combo.currentData())

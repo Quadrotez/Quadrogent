@@ -709,7 +709,8 @@ class FileChip(QWidget):
 
 class ModelPickerDialog(QDialog):
     """Modal model picker with live search."""
-    model_selected = pyqtSignal(str)
+    model_selected    = pyqtSignal(str)
+    refresh_requested = pyqtSignal()
 
     def __init__(self, models: list, current: str, parent=None, vision_ids: set | None = None):
         super().__init__(parent)
@@ -722,8 +723,22 @@ class ModelPickerDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
+        # Header row with search + refresh
+        hdr_row = QHBoxLayout()
         hdr = QLabel("Выберите модель:")
-        layout.addWidget(hdr)
+        hdr_row.addWidget(hdr)
+        hdr_row.addStretch()
+        self._refresh_btn = QPushButton("↻ Обновить")
+        self._refresh_btn.setFixedHeight(26)
+        self._refresh_btn.setStyleSheet(
+            "QPushButton{background:transparent;border:1px solid #333;"
+            "border-radius:5px;color:#888;font-size:11px;padding:0 10px;}"
+            "QPushButton:hover{background:#1a1a1a;color:#fff;}"
+        )
+        self._refresh_btn.clicked.connect(self._do_refresh)
+        hdr_row.addWidget(self._refresh_btn)
+        layout.addLayout(hdr_row)
+
         self._search = QLineEdit()
         self._search.setPlaceholderText("Поиск…")
         self._search.textChanged.connect(self._filter)
@@ -732,6 +747,11 @@ class ModelPickerDialog(QDialog):
         self._fill(models, current)
         self._list.itemDoubleClicked.connect(self._pick)
         layout.addWidget(self._list, 1)
+
+        self._status = QLabel("")
+        self._status.setStyleSheet("color:#666;font-size:10px;")
+        layout.addWidget(self._status)
+
         row = QHBoxLayout()
         row.addStretch()
         cancel = QPushButton("Отмена")
@@ -755,10 +775,28 @@ class ModelPickerDialog(QDialog):
             if m == current:
                 self._list.setCurrentItem(item)
 
+    def _do_refresh(self):
+        """Ask parent ModelSelector to reload models from the API."""
+        self._refresh_btn.setText("↻ Обновляю…")
+        self._refresh_btn.setEnabled(False)
+        QApplication.processEvents()
+        self.refresh_requested.emit()
+
+    def update_models(self, models: list, vision_ids: set):
+        """Called by ModelSelector after refresh completes."""
+        self._all = models
+        self._vision_ids = vision_ids
+        cur = self._list.currentItem()
+        cur_t = cur.data(Qt.UserRole) if cur else ""
+        self._fill(models, cur_t)
+        self._status.setText(f"Моделей: {len(models)}")
+        self._refresh_btn.setText("↻ Обновить")
+        self._refresh_btn.setEnabled(True)
+
     def _filter(self, text):
         cur = self._list.currentItem()
         self._fill([m for m in self._all if text.lower() in m.lower()],
-                   cur.text() if cur else "")
+                   cur.data(Qt.UserRole) if cur else "")
 
     def _pick(self):
         item = self._list.currentItem()
@@ -807,9 +845,33 @@ class ModelSelector(QWidget):
     def _open_picker(self):
         all_m = self._seen if self._seen else self._loaded
         vision_ids = getattr(self, "_vision_ids", set())
-        dlg = ModelPickerDialog(all_m, self._current, self, vision_ids=vision_ids)
-        dlg.model_selected.connect(self._select)
-        dlg.exec_()
+        self._active_dlg = ModelPickerDialog(all_m, self._current, self, vision_ids=vision_ids)
+        self._active_dlg.model_selected.connect(self._select)
+        self._active_dlg.refresh_requested.connect(self._refresh_from_dialog)
+        self._active_dlg.exec_()
+        self._active_dlg = None
+
+    def _refresh_from_dialog(self):
+        """Triggered by refresh button in picker — ask main window to reload models."""
+        self.refresh_clicked.emit()  # main_window connects this to _refresh_models
+        # Wait briefly then update dialog if it's still open
+        import threading
+        def _do():
+            import time; time.sleep(1.5)
+            dlg = getattr(self, "_active_dlg", None)
+            if dlg:
+                from PyQt5.QtCore import QMetaObject, Qt as _Qt
+                QMetaObject.invokeMethod(self, "_update_active_dialog", _Qt.QueuedConnection)
+        threading.Thread(target=_do, daemon=True).start()
+
+    @__import__("PyQt5.QtCore", fromlist=["pyqtSlot"]).pyqtSlot()
+    def _update_active_dialog(self):
+        dlg = getattr(self, "_active_dlg", None)
+        if dlg:
+            dlg.update_models(
+                self._loaded,
+                getattr(self, "_vision_ids", set())
+            )
 
     def _select(self, model_id: str):
         if model_id != self._current:
