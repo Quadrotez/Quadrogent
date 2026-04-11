@@ -493,7 +493,15 @@ class MainWindow(QMainWindow):
         if self.current_chat_id is not None:
             import threading
             chat_id = self.current_chat_id
-            threading.Thread(target=self.agent.auto_memorize, args=(chat_id,), daemon=True).start()
+            chat_data = self.db.get_chat(chat_id)
+            # Only auto-memorize for persistent chats
+            is_persistent = bool(chat_data.get("persistent", 0)) if chat_data else False
+            if is_persistent:
+                threading.Thread(
+                    target=self.agent.auto_memorize,
+                    args=(chat_id,),
+                    daemon=True
+                ).start()
         # AI title generation if requested
         if self._pending_ai_title_chat is not None:
             import threading

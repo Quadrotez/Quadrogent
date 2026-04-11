@@ -333,7 +333,13 @@ class Agent:
             mode, SYSTEM_AUTO
         )
         if memories:
-            base += f"\n\nLong-term memory:\n{memories}"
+            # Put memories BEFORE the main instructions so model can't miss them
+            memory_block = (
+                "━━━ PERSONAL MEMORY (facts about this user — always use these) ━━━\n"
+                + memories + "\n"
+                "━━━ END OF PERSONAL MEMORY ━━━\n\n"
+            )
+            base = memory_block + base
         return base
 
     def _get_system_with_think(self, mode: str, think_mode: bool) -> str:
@@ -357,10 +363,26 @@ class Agent:
             {
                 "role": "system",
                 "content": (
-                    "You are a memory evaluator. Decide if there is NEW important information "
-                    "worth saving to long-term memory (user facts, preferences, goals, setup). "
-                    'Respond ONLY with JSON: {"save": true, "summary": "one sentence"} '
-                    'or {"save": false}. No markdown.'
+                    "You are a strict personal-memory filter. "
+                    "Read the conversation and decide if it contains a CONCRETE PERSONAL FACT "
+                    "about the USER that is worth remembering long-term.\n\n"
+                    "SAVE (save=true) ONLY if the user revealed:\n"
+                    "  - Their name, age, location, occupation, language\n"
+                    "  - A pet, family member, or relationship detail\n"
+                    "  - A specific preference, hobby, or interest\n"
+                    "  - A project name, technology stack, or ongoing task\n"
+                    "  - A health detail, constraint, or lifestyle fact\n"
+                    "  - Any explicit instruction like 'remember that I...'\n\n"
+                    "DO NOT SAVE (save=false):\n"
+                    "  - Small-talk, greetings, or rhetorical questions\n"
+                    "  - Questions the user asked the AI (those are not facts about the user)\n"
+                    "  - Generic statements without personal context\n"
+                    "  - Duplicate facts already obvious from context\n\n"
+                    "If saving, write summary as a THIRD-PERSON FACT about the user, "
+                    "in the same language the user used.\n"
+                    "Example: 'User\'s name is Alexey. He is a Python developer in Moscow.'\n\n"
+                    'Respond ONLY with valid JSON (no markdown): '
+                    '{"save": true, "summary": "..."} or {"save": false}'
                 ),
             },
             {"role": "user", "content": conversation},

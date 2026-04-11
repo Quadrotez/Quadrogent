@@ -219,8 +219,11 @@ class Database:
         memories = self.get_all_memories()
         if not memories:
             return ""
-        parts = [f"- {m['summary']}" for m in memories]
-        return "Воспоминания из прошлых диалогов:\n" + "\n".join(parts)
+        parts = []
+        for m in memories:
+            date = m.get("created_at", "")[:10]
+            parts.append(f"- [{date}] {m['summary']}")
+        return "\n".join(parts)
 
     def close(self):
         with self._lock:
