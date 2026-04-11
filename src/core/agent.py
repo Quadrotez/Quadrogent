@@ -326,24 +326,26 @@ class Agent:
             # "'int' object has no attribute 'strip'" downstream.
             self.on_tool_call(str(name), str(args), str(result))
 
-    def _get_system_prompt(self, mode: str) -> str:
-        memories = self.db.get_memories_text()
+    def _get_system_prompt(self, mode: str, persistent: bool = False) -> str:
         custom = self.db.get_setting(f"system_prompt_{mode}", "")
-        base = custom if custom.strip() else {"work": SYSTEM_WORK, "talk": SYSTEM_TALK, "auto": SYSTEM_AUTO}.get(
-            mode, SYSTEM_AUTO
-        )
-        if memories:
-            # Put memories BEFORE the main instructions so model can't miss them
-            memory_block = (
-                "━━━ PERSONAL MEMORY (facts about this user — always use these) ━━━\n"
-                + memories + "\n"
-                "━━━ END OF PERSONAL MEMORY ━━━\n\n"
-            )
-            base = memory_block + base
+        base = custom if custom.strip() else {
+            "work": SYSTEM_WORK, "talk": SYSTEM_TALK,
+            "auto": SYSTEM_AUTO, "calc": SYSTEM_CALC,
+        }.get(mode, SYSTEM_AUTO)
+        # Only inject memories for persistent chats
+        if persistent:
+            memories = self.db.get_memories_text()
+            if memories:
+                memory_block = (
+                    "━━━ PERSONAL MEMORY (facts about this user — always use these) ━━━\n"
+                    + memories + "\n"
+                    "━━━ END OF PERSONAL MEMORY ━━━\n\n"
+                )
+                base = memory_block + base
         return base
 
-    def _get_system_with_think(self, mode: str, think_mode: bool) -> str:
-        base = self._get_system_prompt(mode)
+    def _get_system_with_think(self, mode: str, think_mode: bool, persistent: bool = False) -> str:
+        base = self._get_system_prompt(mode, persistent=persistent)
         lang = self.db.get_setting("language", "auto")
         lang_instr = LANG_INSTRUCTIONS.get(lang, LANG_INSTRUCTIONS["auto"])
         base += f"\n\n{lang_instr}"
@@ -605,7 +607,7 @@ class Agent:
 
     # ── Main agent loop ───────────────────────────────────────────────────────
 
-    def run(self, chat_id: int, user_message: str, mode: str = "auto", web_search: bool = True, think_mode: bool = True):
+    def run(self, chat_id: int, user_message: str, mode: str = "auto", web_search: bool = True, think_mode: bool = True, persistent: bool = False):
         self._stop = False
         self.db.add_message(chat_id, "user", user_message)
 
@@ -632,7 +634,7 @@ class Agent:
                 f"Run `ls /workspace/` first if unsure about the exact filename."
             )
 
-        system = self._get_system_with_think(mode, think_mode)
+        system = self._get_system_with_think(mode, think_mode, persistent=persistent)
         db_messages = self.db.get_messages(chat_id)
 
         messages = [{"role": "system", "content": system}]

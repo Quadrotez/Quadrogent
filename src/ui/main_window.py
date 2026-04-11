@@ -34,7 +34,7 @@ class AgentWorker(QThread):
     lm_log_signal       = pyqtSignal(str)
 
     def __init__(self, agent: Agent, chat_id: int, text: str, mode: str,
-                 web_search: bool = True, think_mode: bool = True):
+                 web_search: bool = True, think_mode: bool = True, persistent: bool = False):
         super().__init__()
         self.agent = agent
         self.chat_id = chat_id
@@ -42,6 +42,7 @@ class AgentWorker(QThread):
         self.mode = mode
         self.web_search = web_search
         self.think_mode = think_mode
+        self.persistent = persistent
 
     def run(self):
         self.agent.on_message      = lambda r, c: self.message_signal.emit(r, c)
@@ -52,7 +53,8 @@ class AgentWorker(QThread):
         self.agent.on_file_ready   = lambda n, p: self.file_ready_signal.emit(n, p)
         self.agent.on_lm_log       = lambda m: self.lm_log_signal.emit(m)
         self.agent.run(self.chat_id, self.text, self.mode,
-                       web_search=self.web_search, think_mode=self.think_mode)
+                       web_search=self.web_search, think_mode=self.think_mode,
+                       persistent=self.persistent)
         self.finished_signal.emit()
 
 
@@ -441,10 +443,12 @@ class MainWindow(QMainWindow):
         self.chat.set_busy(True)
 
         self._worker_chat_id = self.current_chat_id  # track which chat this worker belongs to
-        web_search = bool(chat_data.get("web_search", 1)) if chat_data else True
-        think_mode = bool(chat_data.get("think_mode", 1)) if chat_data else True
+        web_search  = bool(chat_data.get("web_search",  1)) if chat_data else True
+        think_mode  = bool(chat_data.get("think_mode",  1)) if chat_data else True
+        persistent  = bool(chat_data.get("persistent",  0)) if chat_data else False
         self.worker = AgentWorker(self.agent, self.current_chat_id, llm_text, mode,
-                                  web_search=web_search, think_mode=think_mode)
+                                  web_search=web_search, think_mode=think_mode,
+                                  persistent=persistent)
         self.worker.message_signal.connect(self._on_agent_message)
         self.worker.tool_signal.connect(self._on_agent_tool)
         self.worker.stream_start_signal.connect(self._on_stream_start)

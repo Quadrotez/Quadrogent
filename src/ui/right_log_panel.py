@@ -84,10 +84,37 @@ class RightLogPanel(QWidget):
         layout.addWidget(self._docker_status)
         self.refresh_theme()
 
+    def _status_style(self, color: str) -> str:
+        """Return status bar stylesheet with current theme background."""
+        import builtins
+        light = getattr(builtins, "_quadrogent_theme", "dark") == "light"
+        bg  = "#e8e8e8" if light else "#070707"
+        brd = "#cccccc" if light else "#0f0f0f"
+        return (
+            f"color:{color};font-size:10px;padding:5px 14px;"
+            f"background:{bg};border-top:1px solid {brd};"
+            f"font-family:'JetBrains Mono',monospace;"
+        )
+
     def refresh_theme(self):
         """Re-apply theme-aware styles to log widgets."""
         import builtins
         light = getattr(builtins, "_quadrogent_theme", "dark") == "light"
+        # Header and panel background
+        panel_bg  = "#f0f0f0" if light else "#060606"
+        hdr_bg    = "#e8e8e8" if light else "#080808"
+        hdr_brd   = "#cccccc" if light else "#101010"
+        title_col = "#666666" if light else "#2e2e2e"
+        self.setStyleSheet(f"QWidget#logPanel{{background:{panel_bg};}}")
+        # Find and style header
+        for child in self.findChildren(__import__('PyQt5.QtWidgets', fromlist=['QWidget']).QWidget):
+            name = child.objectName()
+            if name == "logPanelHeader":
+                child.setStyleSheet(
+                    f"background:{hdr_bg};border-bottom:1px solid {hdr_brd};"
+                )
+            elif name == "logPanelTitle":
+                child.setStyleSheet(f"color:{title_col};background:transparent;")
         log_bg    = "#f0f0f0" if light else "#050505"
         log_txt   = "#444444" if light else "#6a6a6a"
         tab_bg    = "#e8e8e8" if light else "#070707"
@@ -185,11 +212,7 @@ class RightLogPanel(QWidget):
             colors = {"ok": "#2e6036", "error": "#8a2e2e", "warn": "#7a5820"}
             c = colors.get(level, "#303030")
             self._docker_status.setText(f"  {short}")
-            self._docker_status.setStyleSheet(
-                f"color: {c}; font-size: 10px; padding: 5px 14px; "
-                "background: #070707; border-top: 1px solid #0f0f0f; "
-                "font-family: 'JetBrains Mono', monospace;"
-            )
+            self._docker_status.setStyleSheet(self._status_style(c))
 
     @pyqtSlot(str)
     def _lm_log_main(self, message: str):
@@ -209,18 +232,10 @@ class RightLogPanel(QWidget):
     def _docker_done(self, success: bool):
         if success:
             self._docker_status.setText("  готов  ✓")
-            self._docker_status.setStyleSheet(
-                "color: #2e6036; font-size: 10px; padding: 5px 14px; "
-                "background: #070707; border-top: 1px solid #0f0f0f; "
-                "font-family: 'JetBrains Mono', monospace;"
-            )
+            self._docker_status.setStyleSheet(self._status_style("#2e6036"))
         else:
             self._docker_status.setText("  ошибка — проверьте лог")
-            self._docker_status.setStyleSheet(
-                "color: #8a2e2e; font-size: 10px; padding: 5px 14px; "
-                "background: #070707; border-top: 1px solid #0f0f0f; "
-                "font-family: 'JetBrains Mono', monospace;"
-            )
+            self._docker_status.setStyleSheet(self._status_style("#8a2e2e"))
 
     # ── Export logs ────────────────────────────────────────────
 
