@@ -88,6 +88,7 @@ EXECUTE EVERY STEP until the task is DONE.
 11. ⚠️ READ tool output! If you see [OK] or "already satisfied", DO NOT repeat the command.
 12. ⚠️ CRITICAL: There is NO "uploads/" directory! NEVER use "uploads/" in ANY command!
 13. ⚠️ WRONG: zip -r uploads/file.zip | RIGHT: zip -r file.zip
+14. ⚠️ ALWAYS quote paths with spaces: cat "/workspace/my file.txt" not cat /workspace/my file.txt
 
 ━━━ HOW TO CREATE FILES (heredoc) ━━━
 execute_command:
@@ -421,7 +422,7 @@ class Agent:
             try:
                 # Absolute /workspace/... paths live inside Docker, not on host
                 if path.startswith("/workspace/"):
-                    ec, out = self.docker.execute(f"cat {path} 2>&1")
+                    ec, out = self.docker.execute(f'cat "{path}" 2>&1')
                     if ec != 0:
                         self._emit_tool(name, path, f"Error: {out.strip()}")
                         return f"Error: {out.strip()}"
