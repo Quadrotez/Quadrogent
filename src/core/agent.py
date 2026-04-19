@@ -261,8 +261,12 @@ def _make_next_step(tool_name: str, exit_code, output_snippet: str,
 
 
 def _strip_think(text: str) -> str:
-    """Remove <think>...</think> blocks — don't store internal reasoning."""
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    """Remove <think>...</think> (and <thinking>) blocks from stored content."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Also strip unclosed think blocks (model cut off mid-think)
+    text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return text.strip()
 
 
 def _extract_exit_code(result: str):
@@ -349,8 +353,14 @@ class Agent:
         lang = self.db.get_setting("language", "auto")
         lang_instr = LANG_INSTRUCTIONS.get(lang, LANG_INSTRUCTIONS["auto"])
         base += f"\n\n{lang_instr}"
-        if not think_mode:
-            base += "\n\nIMPORTANT: Do NOT use <think> blocks. Respond directly without internal reasoning tags."
+        if think_mode:
+            base += (
+                "\n\nThink mode ON: wrap ALL internal reasoning in <think>...</think> tags "
+                "BEFORE your final answer. Example: <think>reasoning here</think> Answer here. "
+                "The user will NOT see the <think> block — only your final answer is shown."
+            )
+        else:
+            base += "\n\nRespond directly. Do NOT use <think> blocks or any internal reasoning tags."
         return base
     def auto_memorize(self, chat_id: int) -> bool:
         """Ask the LLM if the last exchange is worth memorising. Background-safe."""

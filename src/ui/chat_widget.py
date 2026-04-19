@@ -1585,13 +1585,23 @@ class ChatWidget(QWidget):
 
     @staticmethod
     def _split_think(text: str):
-        """Return (think_content, visible_content) from raw streaming text."""
+        """Return (think_content, visible_content) from raw streaming text.
+        Handles <think>, <thinking>, case-insensitive."""
         import re as _re
-        think_parts = _re.findall(r'<think>(.*?)</think>', text, _re.DOTALL)
-        visible = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL)
-        # If think block is not yet closed, strip the open tag and everything after
-        if '<think>' in visible:
-            visible = visible[:visible.index('<think>')]
+        # Collect all closed think blocks
+        think_parts = (
+            _re.findall(r'<think>(.*?)</think>', text, _re.DOTALL | _re.IGNORECASE) +
+            _re.findall(r'<thinking>(.*?)</thinking>', text, _re.DOTALL | _re.IGNORECASE)
+        )
+        visible = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL | _re.IGNORECASE)
+        visible = _re.sub(r'<thinking>.*?</thinking>', '', visible, flags=_re.DOTALL | _re.IGNORECASE)
+        # Strip unclosed opening tag and everything after it
+        for tag in ('<think>', '<thinking>'):
+            low = visible.lower()
+            idx = low.find(tag)
+            if idx != -1:
+                think_parts.append(visible[idx + len(tag):])
+                visible = visible[:idx]
         return "\n".join(think_parts), visible.strip()
 
     def _flush_stream(self):
@@ -1632,10 +1642,8 @@ class ChatWidget(QWidget):
             self._stream_buffer   = ""
         if self._streaming_text:
             import re as _re
-            think_parts = _re.findall(r'<think>(.*?)</think>', self._streaming_text, _re.DOTALL)
-            visible = _re.sub(r'<think>.*?</think>', '', self._streaming_text, flags=_re.DOTALL).strip()
-            if '<think>' in visible:
-                visible = visible[:visible.index('<think>')].strip()
+            think_content, visible = ChatArea._split_think(self._streaming_text)
+            think_parts = [think_content] if think_content else []
             # Build collapsible think block
             think_html = ""
             if think_parts:
