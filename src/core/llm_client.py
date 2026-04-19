@@ -54,12 +54,22 @@ PROVIDERS = {
         "default_models": ["mistral-small-latest", "mistral-large-latest", "codestral-latest"],
         "hint": "API-ключ из console.mistral.ai",
     },
-    "gpt4free": {
-        "name": "GPT4Free (экспериментально)",
-        "base_url": "http://localhost:1337/v1",
-        "needs_key": False,
-        "default_models": ["gpt-4o", "gpt-4", "claude-3.5-sonnet", "gemini-pro"],
-        "hint": "Требует запущенного g4f API: pip install g4f && python -m g4f api",
+    "huggingface": {
+        "name": "Hugging Face",
+        "base_url": "https://router.huggingface.co/v1",
+        "needs_key": True,
+        "default_models": [
+            "deepseek-ai/DeepSeek-V3-0324",
+            "meta-llama/Llama-3.3-70B-Instruct",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "mistralai/Mixtral-8x7B-Instruct-v0.1",
+            "deepseek-ai/DeepSeek-R1",
+        ],
+        "hint": (
+            "API-токен из huggingface.co/settings/tokens\n"
+            "Нужен токен с правом 'Make calls to Inference Providers'.\n"
+            "Модель можно указать с суффиксом провайдера: meta-llama/Llama-3.3-70B-Instruct:cerebras"
+        ),
     },
     "custom": {
         "name": "Свой провайдер",
@@ -370,7 +380,8 @@ class LLMClient:
         vision_keywords = ("vl", "vision", "visual", "llava", "minicpm",
                            "qwen2-vl", "qwen2.5-vl", "pixtral", "phi-3-vision",
                            "gemma-vision", "claude-3", "gpt-4-vision",
-                           "idefics", "cogvlm", "internvl", "molmo")
+                           "idefics", "cogvlm", "internvl", "molmo",
+                           "qwen2-vl", "paligemma", "florence", "idefics")
         results = []
         # Normalise: list or {"data": [...]} or {"models": [...]} or {"object":"list","data":[...]}
         items = []

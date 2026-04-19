@@ -611,42 +611,60 @@ class Agent:
         self._stop = False
         self.db.add_message(chat_id, "user", user_message)
 
-        # Detect attached file / image
-        _image_path = None
-        _file_injection = None   # extra context message about the attached file path
+        # Detect attached files (supports multiple: [Файл: f1][Файл: f2]...)
+        _image_path = None     # first image for vision encoding (if vision model)
+        _file_injections = []  # notes about each file
         import os as _os, re as _re
-        _img_match = _re.match(r'^\[Файл: (.+?)\]', user_message)
-        if _img_match:
-            _fname = _img_match.group(1)
-            _ws = _os.path.abspath("workspace")
-            _p = _os.path.join(_ws, _fname)
-            _ext = _os.path.splitext(_fname)[1].lower()
-            if _ext in IMAGE_EXTENSIONS and _os.path.exists(_p):
-                _image_path = _p
-            # Always inject the exact quoted path so model never has to guess escaping
-            # Try to read file content immediately so model doesn't need to call read_file
-            _file_content = ""
-            try:
-                with open(_p, "r", encoding="utf-8", errors="replace") as _f:
-                    _file_content = _f.read()
-            except Exception:
-                pass
+        _ws = _os.path.abspath("workspace")
+        _file_matches = _re.findall(r"\[Файл: (.+?)\]", user_message)
 
-            if _file_content:
-                _file_injection = (
-                    f"[SYSTEM NOTE] The attached file '{_fname}' has been pre-loaded.\n"
-                    f"You do NOT need to call read_file — the content is below.\n"
-                    f"File path (if you need it): /workspace/{_fname}\n\n"
-                    f"--- FILE CONTENT START ---\n"
-                    f"{_file_content[:8000]}\n"
-                    f"--- FILE CONTENT END ---\n\n"
-                    f"Use this content directly. Do NOT call read_file again."
-                )
+        vision_ids = getattr(self, "_vision_model_ids", set())
+        cur_model  = self.llm.model or ""
+        model_has_vision = (not vision_ids) or (cur_model in vision_ids)
+
+        for _fname in _file_matches:
+            _p   = _os.path.join(_ws, _fname)
+            _ext = _os.path.splitext(_fname)[1].lower()
+            is_image = _ext in IMAGE_EXTENSIONS
+
+            if is_image:
+                if model_has_vision and _image_path is None and _os.path.exists(_p):
+                    # Vision model → will encode first image as base64 below
+                    _image_path = _p
+                    _file_injections.append(
+                        f"[Прикреплено изображение: /workspace/{_fname}] "
+                        f"Модель видит его содержимое выше."
+                    )
+                else:
+                    # Non-vision model → file is in workspace, use it as-is
+                    _file_injections.append(
+                        f"[SYSTEM NOTE] Image file at /workspace/{_fname} "
+                        f"(model cannot see its contents). "
+                        f"Use it in the project as-is — copy or reference it."
+                    )
             else:
-                _file_injection = (
-                    f"[SYSTEM NOTE] The attached file is at /workspace/{_fname}\n"
-                    f"ALWAYS quote the path: cat \"/workspace/{_fname}\""
-                )
+                # Text/binary file → try to read and inject content
+                _file_content = ""
+                try:
+                    with open(_p, "r", encoding="utf-8", errors="replace") as _f:
+                        _file_content = _f.read()
+                except Exception:
+                    pass
+
+                if _file_content:
+                    _file_injections.append(
+                        f"[Файл '{_fname}' предзагружен]\n"
+                        f"Путь: /workspace/{_fname}\n"
+                        f"--- СОДЕРЖИМОЕ ---\n{_file_content[:8000]}\n--- КОНЕЦ ---\n"
+                        f"Не вызывай read_file — данные уже есть выше."
+                    )
+                else:
+                    _file_injections.append(
+                        f"[SYSTEM NOTE] File at /workspace/{_fname} — "
+                        f"ALWAYS quote the path: cat \"/workspace/{_fname}\""
+                    )
+
+        _file_injection = "\n\n".join(_file_injections) if _file_injections else None
 
         system = self._get_system_with_think(mode, think_mode, persistent=persistent)
         db_messages = self.db.get_messages(chat_id)
@@ -657,8 +675,9 @@ class Agent:
                 msg = {"role": m["role"], "content": m["content"]}
                 # For the LAST user message, upgrade to vision if image attached
                 if m["role"] == "user" and m["content"] == user_message and _image_path:
-                    text_part = _re.sub(r'^\[Файл: .+?\]\n?', '', m["content"]).strip()
-                    msg = _encode_image_message(text_part or "Опиши это изображение.", _image_path)
+                    # Strip all [Файл: ...] prefixes to get clean user text
+                    text_part = _re.sub(r"\[Файл: [^\]]+\]", "", m["content"]).strip()
+                    msg = _encode_image_message(text_part or "Посмотри на изображение и выполни задачу.", _image_path)
                 messages.append(msg)
             elif m["role"] == "tool":
                 messages.append({"role": "user", "content": m["content"]})
@@ -855,21 +874,26 @@ class Agent:
                     self.on_stream_end()
                 err_str = str(e)
                 # Friendly messages for common errors
+                # Strip verbose HTTP URL from error message
+                import re as _re
+                clean_err = err_str.split(' for url:')[0].strip()
                 if "Connection refused" in err_str or "ConnectionError" in err_str:
                     hint = "Провайдер недоступен. Проверьте, что сервис запущен и URL правильный."
                 elif "401" in err_str or "Unauthorized" in err_str:
-                    hint = "Неверный API-ключ (401 Unauthorized). Проверьте ключ в настройках."
+                    hint = "Неверный API-ключ. Проверьте ключ в настройках → Подключение."
                 elif "403" in err_str or "Forbidden" in err_str:
-                    hint = "Доступ запрещён (403). Проверьте API-ключ и права доступа."
+                    hint = "Доступ запрещён. Проверьте API-ключ и права доступа."
+                elif "400" in err_str or "Bad Request" in err_str:
+                    hint = "Неверный запрос (400). Возможно, модель не поддерживает изображения или инструменты. Попробуйте другую модель."
                 elif "429" in err_str or "rate limit" in err_str.lower():
-                    hint = "Превышен лимит запросов (429). Подождите немного или смените провайдера."
+                    hint = "Превышен лимит запросов. Подождите или смените провайдера."
                 elif "timeout" in err_str.lower():
                     hint = "Время ожидания истекло. Провайдер не отвечает."
                 elif "model" in err_str.lower() and ("not found" in err_str.lower() or "does not exist" in err_str.lower()):
-                    hint = f"Модель не найдена у провайдера. Выберите другую модель."
+                    hint = "Модель не найдена у провайдера. Выберите другую модель."
                 else:
                     hint = ""
-                error_msg = f"⚠ Ошибка: {err_str}" + (f"\n\n{hint}" if hint else "")
+                error_msg = f"⚠ {clean_err}" + (f"\n\n💡 {hint}" if hint else "")
                 self._emit("error", error_msg)
                 self.db.add_message(chat_id, "assistant", error_msg)
                 return

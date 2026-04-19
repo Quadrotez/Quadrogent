@@ -410,6 +410,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_models(self):
         loaded = self.agent.llm.get_models()
+
+        # Fallback: if no models returned, use provider default list
+        if not loaded:
+            from src.core.llm_client import PROVIDERS
+            pid = self.db.get_setting("api_provider", "lmstudio")
+            loaded = PROVIDERS.get(pid, {}).get("default_models", [])
+
         seen_raw = self.db.get_setting("seen_models", "")
         seen: list[str] = json.loads(seen_raw) if seen_raw else []
         for m in loaded:
@@ -423,6 +430,8 @@ class MainWindow(QMainWindow):
         except Exception:
             vision_ids = set()
         self.chat.model_selector.set_models(loaded, seen, vision_ids=vision_ids)
+        # Give agent access to vision_ids for pre-flight check
+        self.agent._vision_model_ids = vision_ids
         saved_model = self.db.get_setting("current_model", "")
         if saved_model:
             self.chat.model_selector.set_current_model(saved_model)
@@ -459,6 +468,7 @@ class MainWindow(QMainWindow):
             self._load_chats()
 
         self.chat.set_busy(True)
+        self._worker_busy = True
 
         self._worker_chat_id = self.current_chat_id  # track which chat this worker belongs to
         web_search  = bool(chat_data.get("web_search",  1)) if chat_data else True
@@ -527,19 +537,21 @@ class MainWindow(QMainWindow):
 
     def _on_agent_done(self):
         self.chat.set_busy(False)
+        self._last_done_chat_id = self.current_chat_id
+        self._worker_busy = False
         self.worker = None
         if self.current_chat_id is not None:
             import threading
             chat_id = self.current_chat_id
             chat_data = self.db.get_chat(chat_id)
-            # Only auto-memorize for persistent chats
             is_persistent = bool(chat_data.get("persistent", 0)) if chat_data else False
             if is_persistent:
-                threading.Thread(
-                    target=self.agent.auto_memorize,
-                    args=(chat_id,),
-                    daemon=True
-                ).start()
+                def _safe_memorize(cid):
+                    # Only run if user hasn't sent another message yet
+                    import time; time.sleep(0.5)
+                    if getattr(self, "_last_done_chat_id", None) == cid and                        not getattr(self, "_worker_busy", False):
+                        self.agent.auto_memorize(cid)
+                threading.Thread(target=_safe_memorize, args=(chat_id,), daemon=True).start()
         # AI title generation if requested
         if self._pending_ai_title_chat is not None:
             import threading

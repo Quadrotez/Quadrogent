@@ -335,48 +335,21 @@ class AppSettingsDialog(QDialog):
             note = QLabel("Убедитесь, что LM Studio запущен и сервер активен.")
             note.setStyleSheet("color:#606060;font-size:10px;")
             self._provider_settings_vl.addWidget(note)
-        elif pid == "gpt4free":
-            g4f_row = QHBoxLayout()
-            self._g4f_launch_btn = QPushButton("▶  Запустить g4f API")
-            self._g4f_launch_btn.setStyleSheet(
-                "QPushButton{background:#0a1a0a;border:1px solid #1a3a1a;"
-                "border-radius:5px;color:#5a9a5a;font-size:11px;padding:4px 12px;}"
-                "QPushButton:hover{background:#0f240f;color:#7acc7a;}"
-                "QPushButton:disabled{color:#2a4a2a;border-color:#111;}"
-            )
-            # Reflect current process state
-            proc = AppSettingsDialog._g4f_process
-            is_running = proc is not None and proc.poll() is None
-            self._g4f_launch_btn.setEnabled(not is_running)
-            self._g4f_launch_btn.clicked.connect(self._launch_g4f)
-            g4f_row.addWidget(self._g4f_launch_btn)
 
-            self._g4f_stop_btn = QPushButton("■  Остановить")
-            self._g4f_stop_btn.setStyleSheet(
-                "QPushButton{background:#1a0a0a;border:1px solid #3a1a1a;"
-                "border-radius:5px;color:#9a5a5a;font-size:11px;padding:4px 12px;}"
-                "QPushButton:hover{background:#240f0f;color:#cc7a7a;}"
-                "QPushButton:disabled{color:#3a1a1a;border-color:#111;}"
-            )
-            self._g4f_stop_btn.setEnabled(is_running)
-            self._g4f_stop_btn.clicked.connect(self._stop_g4f)
-            g4f_row.addWidget(self._g4f_stop_btn)
-            self._provider_settings_vl.addLayout(g4f_row)
-
-            self._g4f_status = QLabel(
-                "✓ Работает" if is_running else "Статус: не запущен"
-            )
-            self._g4f_status.setStyleSheet(
-                f"color:{'#5a9a5a' if is_running else '#555'};font-size:10px;"
-            )
-            self._provider_settings_vl.addWidget(self._g4f_status)
-            note2 = QLabel("Требует: pip install g4f[api]")
-            note2.setStyleSheet("color:#404040;font-size:10px;")
-            self._provider_settings_vl.addWidget(note2)
         elif pid == "openrouter":
             note = QLabel("Заголовки HTTP-Referer и X-Title добавляются автоматически.")
             note.setStyleSheet("color:#606060;font-size:10px;")
             self._provider_settings_vl.addWidget(note)
+        elif pid == "huggingface":
+            hf_txt = (
+                "Модель: org/name или org/name:provider\n"
+                "Пример: meta-llama/Llama-3.3-70B-Instruct:cerebras\n"
+                "Бэкенды: :cerebras  :fireworks-ai  :groq  :together  :auto"
+            )
+            hf_note = QLabel(hf_txt)
+            hf_note.setStyleSheet("color:#606060;font-size:10px;")
+            hf_note.setWordWrap(True)
+            self._provider_settings_vl.addWidget(hf_note)
 
         # Default models hint
         default_models = info.get("default_models", [])
@@ -385,100 +358,6 @@ class AppSettingsDialog(QDialog):
             models_lbl.setStyleSheet("color:#505050;font-size:10px;")
             models_lbl.setWordWrap(True)
             self._provider_settings_vl.addWidget(models_lbl)
-
-    # ── GPT4Free process management ───────────────────────────────────────────
-
-    _g4f_process = None  # class-level so it survives tab switches
-
-    def _launch_g4f(self):
-        import subprocess, sys
-        if AppSettingsDialog._g4f_process and AppSettingsDialog._g4f_process.poll() is None:
-            self._g4f_status.setText("Статус: уже запущен")
-            return
-
-        # Check if uvicorn (required by g4f[api]) is available; install if not
-        try:
-            import uvicorn  # noqa
-        except ImportError:
-            self._g4f_status.setText("Устанавливаю g4f[api]… подождите")
-            self._g4f_status.setStyleSheet("color:#ca9a38;font-size:10px;")
-            from PyQt5.QtWidgets import QApplication
-            QApplication.processEvents()
-            try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "g4f[api]", "-q"],
-                    timeout=120
-                )
-            except Exception as e:
-                self._g4f_status.setText(f"✗ Не удалось установить: {e}")
-                self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
-                return
-
-        try:
-            import tempfile, os
-            log_file = open(os.path.join(tempfile.gettempdir(), "g4f_api.log"), "w")
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "g4f", "api", "--port", "1337"],
-                stdout=log_file,
-                stderr=log_file,
-            )
-            AppSettingsDialog._g4f_process = proc
-            AppSettingsDialog._g4f_logfile = log_file
-            self._g4f_launch_btn.setEnabled(False)
-            self._g4f_stop_btn.setEnabled(True)
-            self._g4f_status.setText("Запускается… (порт 1337)")
-            self._g4f_status.setStyleSheet("color:#ca9a38;font-size:10px;")
-            from PyQt5.QtCore import QTimer
-            QTimer.singleShot(4000, self._check_g4f_status)
-        except Exception as e:
-            self._g4f_status.setText(f"✗ Ошибка запуска: {e}")
-            self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
-
-    def _stop_g4f(self):
-        proc = AppSettingsDialog._g4f_process
-        if proc and proc.poll() is None:
-            proc.terminate()
-            AppSettingsDialog._g4f_process = None
-        if hasattr(self, "_g4f_launch_btn"):
-            self._g4f_launch_btn.setEnabled(True)
-            self._g4f_stop_btn.setEnabled(False)
-            self._g4f_status.setText("Статус: остановлен")
-            self._g4f_status.setStyleSheet("color:#555;font-size:10px;")
-
-    def _check_g4f_status(self):
-        proc = AppSettingsDialog._g4f_process
-        if not hasattr(self, "_g4f_status"):
-            return
-        if proc and proc.poll() is None:
-            # Try to connect
-            try:
-                import requests
-                r = requests.get("http://localhost:1337/v1/models", timeout=2)
-                if r.status_code == 200:
-                    n = len(r.json().get("data", []))
-                    self._g4f_status.setText(f"✓ Работает — {n} моделей на порту 1337")
-                    self._g4f_status.setStyleSheet("color:#5a9a5a;font-size:10px;")
-                    return
-            except Exception:
-                pass
-            self._g4f_status.setText("Запускается… подождите")
-        else:
-            # Read last lines from log for diagnosis
-            log_tail = ""
-            try:
-                import tempfile, os
-                lf = os.path.join(tempfile.gettempdir(), "g4f_api.log")
-                with open(lf) as f:
-                    lines = f.readlines()
-                    log_tail = " | ".join(l.strip() for l in lines[-3:] if l.strip())
-            except Exception:
-                pass
-            err_msg = f"✗ Ошибка: {log_tail[:120]}" if log_tail else "✗ Процесс завершился"
-            self._g4f_status.setText(err_msg)
-            self._g4f_status.setStyleSheet("color:#da4848;font-size:10px;")
-            if hasattr(self, "_g4f_launch_btn"):
-                self._g4f_launch_btn.setEnabled(True)
-                self._g4f_stop_btn.setEnabled(False)
 
     def _toggle_key_visibility(self):
         if hasattr(self, "_api_key_edit"):

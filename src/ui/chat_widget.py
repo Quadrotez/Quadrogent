@@ -1084,8 +1084,7 @@ class ChatWidget(QWidget):
         self._streaming_text = ""
         self._streaming_base = ""
         self._stream_buffer  = ""
-        self._pending_file: tuple[str, str] | None = None
-        self._file_chip: FileChip | None = None
+        self._pending_files: list[tuple[str, str]] = []  # [(filename, abs_path), ...]
         self._raw_messages: list[dict] = []
         self._chat_title: str = "Чат"
         self._is_persistent: bool = False
@@ -1384,24 +1383,50 @@ class ChatWidget(QWidget):
 
     # ── File chip ─────────────────────────────────────────
 
-    def set_pending_file(self, filename: str, abs_path: str):
-        self._clear_chip()
-        self._pending_file = (filename, abs_path)
+    def add_pending_file(self, filename: str, abs_path: str):
+        """Add a file to the pending list (supports multiple files)."""
+        # Prevent duplicates
+        if any(f == filename for f, _ in self._pending_files):
+            return
+        self._pending_files.append((filename, abs_path))
+        # Remove trailing stretch before adding chip
+        while self._chip_row.count():
+            item = self._chip_row.itemAt(self._chip_row.count() - 1)
+            if item and item.spacerItem():
+                self._chip_row.takeAt(self._chip_row.count() - 1)
+                break
+            else:
+                break
         chip = FileChip(filename)
-        chip.removed.connect(self._clear_chip)
+        chip.removed.connect(lambda fn=filename: self._remove_chip(fn))
         self._chip_row.addWidget(chip)
         self._chip_row.addStretch(1)
-        self._file_chip = chip
+        self.check_vision_warning()
         self.input.setFocus()
 
-    def _clear_chip(self):
-        if self._file_chip:
-            self._file_chip.setParent(None)
-            self._file_chip = None
+    # Keep backward compat
+    def set_pending_file(self, filename: str, abs_path: str):
+        self.add_pending_file(filename, abs_path)
+
+    def _remove_chip(self, filename: str):
+        """Remove one specific file chip."""
+        self._pending_files = [(f, p) for f, p in self._pending_files if f != filename]
+        # Rebuild chip row
         while self._chip_row.count():
             item = self._chip_row.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        self._pending_file = None
+        for fn, ap in self._pending_files:
+            chip = FileChip(fn)
+            chip.removed.connect(lambda f=fn: self._remove_chip(f))
+            self._chip_row.addWidget(chip)
+        self._chip_row.addStretch(1)
+
+    def _clear_chip(self):
+        self._pending_files.clear()
+        while self._chip_row.count():
+            item = self._chip_row.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        self._chip_row.addStretch(1)
 
     # ── Input helpers ─────────────────────────────────────
 
@@ -1416,15 +1441,22 @@ class ChatWidget(QWidget):
             self.stop_requested.emit()
             return
         text    = self.input.toPlainText().strip()
-        pending = self._pending_file
+        pending = self._pending_files.copy()
         if not text and not pending:
             return
         self.input.clear()
         if pending:
-            filename, abs_path = pending
-            llm_text = f"[Файл: {filename}]\n{text}" if text else f"[Файл: {filename}]"
+            # Build prefix "[Файл: f1][Файл: f2]..." + text
+            prefix = "".join(f"[Файл: {fn}]" for fn, _ in pending)
+            llm_text = f"{prefix}\n{text}" if text else prefix
             self._clear_chip()
-            self._add_user_message_with_file(filename, text)
+            # Show user bubble with all files
+            for fn, _ in pending:
+                self._add_user_message_with_file(fn, text if fn == pending[-1][0] else "")
+            if len(pending) > 1:
+                # Only the last chip shows the text; re-render as single bubble
+                # Rebuild as one bubble with all file chips + text
+                pass  # handled per-file above for now
         else:
             llm_text = text
             self._append_message("user", text)
