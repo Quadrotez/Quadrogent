@@ -1060,6 +1060,19 @@ class QuickSettingsPanel(QWidget):
 #  ChatWidget
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+class _ChatBrowser(QTextBrowser):
+    """QTextBrowser subclass that reliably fires anchorClicked for ALL schemes."""
+    def mousePressEvent(self, e):
+        # Get anchor at click position BEFORE calling super (which may swallow it)
+        anchor = self.anchorAt(e.pos())
+        if anchor:
+            from PyQt5.QtCore import QUrl
+            self.anchorClicked.emit(QUrl(anchor))
+            return  # don't let super navigate
+        super().mousePressEvent(e)
+
+
 class ChatWidget(QWidget):
     send_message         = pyqtSignal(str)
     attach_file          = pyqtSignal(str)
@@ -1173,7 +1186,7 @@ class ChatWidget(QWidget):
         layout.addWidget(top_bar)
 
         # ── Chat browser ──────────────────────────────────
-        self.browser = QTextBrowser()
+        self.browser = _ChatBrowser()
         self.browser.setObjectName("chatBrowser")
         self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
@@ -1396,27 +1409,42 @@ class ChatWidget(QWidget):
             QDesktopServices.openUrl(url)
 
     def _rebuild_think_blocks(self):
-        """Rebuild _messages_html, replacing all think blocks with current expand state."""
+        """Rebuild _messages_html replacing think blocks using href anchors."""
         import re as _re
-        # Replace each think block anchor/content based on current _think_expanded state
-        def _replace_block(m):
-            # Extract index from href="think://N"
-            idx_match = _re.search(r'href="think://(\\d+)"', m.group(0))
-            if not idx_match:
-                return m.group(0)
-            idx = int(idx_match.group(1))
-            tc = self._think_store.get(idx, "")
+        html = self._messages_html
+        for idx, tc in self._think_store.items():
+            # Find the think div by its unique href="think://N"
+            anchor = f'href="think://{idx}"'
+            pos = html.find(anchor)
+            if pos == -1:
+                continue
+            # Walk back to find the opening <div of this block
+            div_start = html.rfind('<div', 0, pos)
+            if div_start == -1:
+                continue
+            # Walk forward to find the matching </div>
+            # Count nested divs
+            depth = 0
+            i = div_start
+            div_end = -1
+            while i < len(html):
+                if html[i:i+4] == '<div':
+                    depth += 1
+                    i += 4
+                elif html[i:i+6] == '</div>':
+                    depth -= 1
+                    if depth == 0:
+                        div_end = i + 6
+                        break
+                    i += 6
+                else:
+                    i += 1
+            if div_end == -1:
+                continue
             expanded = idx in self._think_expanded
-            return self._make_think_block(idx, tc, expanded)
-
-        # Match complete think div blocks
-        new_html = _re.sub(
-            '<div[^>]*border-left[^>]*>.*?think://\\d+.*?</div>',
-            _replace_block,
-            self._messages_html,
-            flags=_re.DOTALL
-        )
-        self._messages_html = new_html
+            new_block = self._make_think_block(idx, tc, expanded)
+            html = html[:div_start] + new_block + html[div_end:]
+        self._messages_html = html
         self._render()
 
     # ── File chip ─────────────────────────────────────────
@@ -1639,6 +1667,7 @@ class ChatWidget(QWidget):
             inner = ""
             arrow = "▸"
         return (
+            ''
             f'<div style="border-left:2px solid {C["avatar_border"]};margin-bottom:8px;'
             f'padding:5px 10px;border-radius:0 4px 4px 0;background:{C["tool_body_bg"]};">'
             f'<a href="think://{idx}" style="color:{label_color};font-size:10px;'
@@ -1648,6 +1677,7 @@ class ChatWidget(QWidget):
             f'</a>'
             f'{inner}'
             f'</div>'
+            ''
         )
 
     @staticmethod
