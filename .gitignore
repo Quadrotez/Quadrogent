@@ -36,3 +36,11 @@ Thumbs.db
 
 # Docker
 docker-agent-data/
+# SQLite journal files
+*.db-journal
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+.cache/
+workspace/

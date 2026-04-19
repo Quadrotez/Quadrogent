@@ -1090,6 +1090,8 @@ class ChatWidget(QWidget):
         self._is_persistent: bool = False
         self._is_thinking: bool = False
         self._fade_next: bool = False  # fade in on next full render (chat switch)
+        self._think_store:    dict[int, str] = {}   # idx → raw think content
+        self._think_expanded: set[int] = set()       # indices with expanded think blocks
 
         self._stream_timer = QTimer(self)
         self._stream_timer.setInterval(self._STREAM_INTERVAL_MS)
@@ -1366,6 +1368,18 @@ class ChatWidget(QWidget):
     # ── Link handler ──────────────────────────────────────
 
     def _on_link_clicked(self, url: QUrl):
+        if url.scheme() == "think":
+            try:
+                idx = int(url.host())
+            except (ValueError, AttributeError):
+                return
+            if idx in self._think_expanded:
+                self._think_expanded.discard(idx)
+            else:
+                self._think_expanded.add(idx)
+            # Rebuild messages_html with updated think block
+            self._rebuild_think_blocks()
+            return
         if url.scheme() == "file":
             abs_path = url.toLocalFile()
             if not os.path.exists(abs_path):
@@ -1380,6 +1394,30 @@ class ChatWidget(QWidget):
                     self.status_label.setText(f"Ошибка: {e}")
         else:
             QDesktopServices.openUrl(url)
+
+    def _rebuild_think_blocks(self):
+        """Rebuild _messages_html, replacing all think blocks with current expand state."""
+        import re as _re
+        # Replace each think block anchor/content based on current _think_expanded state
+        def _replace_block(m):
+            # Extract index from href="think://N"
+            idx_match = _re.search(r'href="think://(\\d+)"', m.group(0))
+            if not idx_match:
+                return m.group(0)
+            idx = int(idx_match.group(1))
+            tc = self._think_store.get(idx, "")
+            expanded = idx in self._think_expanded
+            return self._make_think_block(idx, tc, expanded)
+
+        # Match complete think div blocks
+        new_html = _re.sub(
+            '<div[^>]*border-left[^>]*>.*?think://\\d+.*?</div>',
+            _replace_block,
+            self._messages_html,
+            flags=_re.DOTALL
+        )
+        self._messages_html = new_html
+        self._render()
 
     # ── File chip ─────────────────────────────────────────
 
@@ -1583,26 +1621,77 @@ class ChatWidget(QWidget):
     def append_stream(self, chunk: str):
         self._stream_buffer += chunk
 
+    def _make_think_block(self, idx: int, think_text: str, expanded: bool) -> str:
+        """Build the think-block HTML for a given message index.
+        Uses only static HTML (no JS) — toggling is done via Python on anchor click.
+        """
+        label_color = C["tool_body_txt"]
+        if expanded:
+            tc_esc = html.escape(think_text).replace("\n", "<br>")
+            inner = (
+                f'<div style="color:{C["code_txt"]};font-size:11px;'
+                f'font-family:{MONO};margin-top:6px;padding-top:6px;'
+                f'border-top:1px solid {C["user_border"]};line-height:1.6;">'
+                f'{tc_esc}</div>'
+            )
+            arrow = "▾"
+        else:
+            inner = ""
+            arrow = "▸"
+        return (
+            f'<div style="border-left:2px solid {C["avatar_border"]};margin-bottom:8px;'
+            f'padding:5px 10px;border-radius:0 4px 4px 0;background:{C["tool_body_bg"]};">'
+            f'<a href="think://{idx}" style="color:{label_color};font-size:10px;'
+            f'font-family:{MONO};text-transform:uppercase;letter-spacing:0.8px;'
+            f'text-decoration:none;">'
+            f'&#129504; {arrow} думал — {"свернуть" if expanded else "развернуть"}'
+            f'</a>'
+            f'{inner}'
+            f'</div>'
+        )
+
     @staticmethod
     def _split_think(text: str):
-        """Return (think_content, visible_content) from raw streaming text.
-        Handles <think>, <thinking>, case-insensitive."""
+        """Separate reasoning from visible answer.
+
+        Handles ALL real-world patterns:
+        1. <think>...</think>   — both tags present
+        2. ...</think>          — ONLY closing tag (model omitted opening)  ← most common
+        3. <think>...           — opening tag only, still streaming
+        4. <thinking>...</thinking> — alternate tag name
+        """
         import re as _re
-        # Collect all closed think blocks
-        think_parts = (
-            _re.findall(r'<think>(.*?)</think>', text, _re.DOTALL | _re.IGNORECASE) +
-            _re.findall(r'<thinking>(.*?)</thinking>', text, _re.DOTALL | _re.IGNORECASE)
-        )
-        visible = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL | _re.IGNORECASE)
-        visible = _re.sub(r'<thinking>.*?</thinking>', '', visible, flags=_re.DOTALL | _re.IGNORECASE)
-        # Strip unclosed opening tag and everything after it
-        for tag in ('<think>', '<thinking>'):
-            low = visible.lower()
-            idx = low.find(tag)
-            if idx != -1:
-                think_parts.append(visible[idx + len(tag):])
-                visible = visible[:idx]
-        return "\n".join(think_parts), visible.strip()
+
+        # ── Case 1: properly wrapped <think>...</think> ─────────────────────────
+        if _re.search(r'<think>.*?</think>', text, _re.DOTALL | _re.IGNORECASE) or            _re.search(r'<thinking>.*?</thinking>', text, _re.DOTALL | _re.IGNORECASE):
+            think_parts = (
+                _re.findall(r'<think>(.*?)</think>', text, _re.DOTALL | _re.IGNORECASE) +
+                _re.findall(r'<thinking>(.*?)</thinking>', text, _re.DOTALL | _re.IGNORECASE)
+            )
+            visible = _re.sub(r'<think>.*?</think>', '', text, flags=_re.DOTALL | _re.IGNORECASE)
+            visible = _re.sub(r'<thinking>.*?</thinking>', '', visible, flags=_re.DOTALL | _re.IGNORECASE)
+            visible = _re.sub(r'</?think(?:ing)?>', '', visible, flags=_re.IGNORECASE)
+            return "\n".join(think_parts), visible.strip()
+
+        # ── Case 2: ONLY </think> present (most common for Qwen uncensored) ────
+        close = _re.search(r'</think(?:ing)?\s*>', text, _re.IGNORECASE)
+        if close:
+            think_content = text[:close.start()]
+            # Strip any stray opening tag from the beginning of think content
+            think_content = _re.sub(r'^\s*<think(?:ing)?\s*>\s*', '', think_content,
+                                    flags=_re.IGNORECASE)
+            visible = text[close.end():]
+            return think_content.strip(), visible.strip()
+
+        # ── Case 3: opening <think> only (still streaming) ──────────────────────
+        open_tag = _re.search(r'<think(?:ing)?\s*>', text, _re.IGNORECASE)
+        if open_tag:
+            before = text[:open_tag.start()].strip()
+            thinking_so_far = text[open_tag.end():]
+            return thinking_so_far.strip(), before
+
+        # ── No tags at all ───────────────────────────────────────────────────────
+        return "", text.strip()
 
     def _flush_stream(self):
         if not self._stream_buffer:
@@ -1621,15 +1710,18 @@ class ChatWidget(QWidget):
         )
         think_html = ""
         if think_content:
-            tc_esc = html.escape(think_content[:800]).replace("\n", "<br>")
+            # During streaming: show last 3 lines of thinking as live preview
+            preview_lines = think_content.strip().split("\n")[-3:]
+            preview = " ".join(l.strip() for l in preview_lines if l.strip())[:200]
             think_html = (
-                f'<div style="border-left:2px solid #1a1a1a;padding:4px 10px;'
-                f'color:#333;font-size:11px;font-family:{MONO};'
-                f'background:#080808;margin-bottom:6px;'
-                f'border-radius:0 4px 4px 0;max-height:120px;overflow:hidden;">'
-                f'<span style="color:#252525;font-size:9.5px;letter-spacing:0.8px;'
-                f'text-transform:uppercase;display:block;margin-bottom:3px;">думает&#x2026;</span>'
-                f'{tc_esc}</div>'
+                f'<div style="border-left:2px solid {C["avatar_border"]};padding:5px 10px;'
+                f'margin-bottom:6px;border-radius:0 4px 4px 0;background:{C["tool_body_bg"]};">'
+                f'<span style="color:{C["code_lang_txt"]};font-size:9.5px;letter-spacing:0.8px;'
+                f'text-transform:uppercase;display:block;margin-bottom:3px;'
+                f'font-family:{MONO};">&#129504; думает&#x2026;</span>'
+                f'<span style="color:{C["tool_body_txt"]};font-size:11px;font-family:{MONO};'
+                f'font-style:italic;">{html.escape(preview)}</span>'
+                f'</div>'
             )
         block = _asst_bubble(think_html + escaped + cursor_span)
         self.browser.setHtml(_message_css() + f"<body>{self._streaming_base}{block}</body>")
@@ -1642,7 +1734,7 @@ class ChatWidget(QWidget):
             self._stream_buffer   = ""
         if self._streaming_text:
             import re as _re
-            think_content, visible = ChatArea._split_think(self._streaming_text)
+            think_content, visible = self._split_think(self._streaming_text)
             think_parts = [think_content] if think_content else []
             # Build collapsible think block
             think_html = ""
@@ -1650,16 +1742,10 @@ class ChatWidget(QWidget):
                 tc = "\n---\n".join(think_parts)
                 tc_esc = html.escape(tc).replace("\n", "<br>")
                 n = len(self._raw_messages)
-                think_html = (
-                    f'<div style="border-left:2px solid #161616;margin-bottom:8px;'
-                    f'padding:4px 10px;border-radius:0 4px 4px 0;background:#070707;">'
-                    f'<a href="think://{n}" style="color:#2a2a2a;font-size:9.5px;'
-                    f'font-family:{MONO};text-transform:uppercase;letter-spacing:0.8px;'
-                    f'text-decoration:none;">&#129504; думал — нажми чтобы развернуть</a>'
-                    f'<div id="think-{n}" style="display:none;color:#333;font-size:11px;'
-                    f'font-family:{MONO};margin-top:4px;">{tc_esc}</div>'
-                    f'</div>'
-                )
+                # Store think content so Python-side toggle can re-render it
+                self._think_store[n] = tc
+                is_expanded = n in self._think_expanded
+                think_html = self._make_think_block(n, tc, is_expanded)
             rendered = _md_to_html(visible) if visible else ""
             self._messages_html = self._streaming_base + _asst_bubble(think_html + rendered)
             self._raw_messages.append({

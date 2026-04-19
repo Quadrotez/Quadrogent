@@ -261,11 +261,17 @@ def _make_next_step(tool_name: str, exit_code, output_snippet: str,
 
 
 def _strip_think(text: str) -> str:
-    """Remove <think>...</think> (and <thinking>) blocks from stored content."""
+    """Remove think blocks from stored content (all patterns)."""
+    # Standard wrapped blocks
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    # Also strip unclosed think blocks (model cut off mid-think)
-    text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Closing tag only: everything before </think> is thinking
+    import re as _re2
+    m = _re2.search(r"</think(?:ing)?>", text, _re2.IGNORECASE)
+    if m:
+        text = text[m.end():]
+    # Unclosed opening tag: everything after is thinking
+    text = re.sub(r"<think(?:ing)?>.*$", "", text, flags=re.DOTALL | re.IGNORECASE)
     return text.strip()
 
 
