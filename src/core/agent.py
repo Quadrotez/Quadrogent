@@ -146,6 +146,93 @@ execute_command:
       return render(request, 'home.html', {})
   EOF
 
+⚠️ FOR LARGE FILES (>100 lines):
+Use echo with append (>>) to build file in parts:
+
+execute_command:
+  cat > /workspace/game.py << 'EOF'
+  # Part 1: Imports and class definition
+  import tkinter as tk
+  class Game:
+      def __init__(self):
+          self.window = tk.Tk()
+  EOF
+
+execute_command:
+  cat >> /workspace/game.py << 'EOF'
+  # Part 2: Methods
+      def start(self):
+          self.window.mainloop()
+  EOF
+
+execute_command:
+  cat >> /workspace/game.py << 'EOF'
+  # Part 3: Main
+  if __name__ == '__main__':
+      game = Game()
+      game.start()
+  EOF
+
+CRITICAL: Use >> (append) for parts 2+, not > (overwrite)!
+
+━━━ HOW TO EDIT FILES (sed) ━━━
+DO NOT rewrite entire file to make small changes! Use sed instead:
+
+REPLACE TEXT:
+  sed -i 's/old_text/new_text/' /workspace/file.py
+  sed -i 's/old_text/new_text/g' /workspace/file.py  # all occurrences
+
+REPLACE LINE BY NUMBER:
+  sed -i '5s/.*/new line content/' /workspace/file.py  # replace line 5
+
+INSERT BEFORE/AFTER PATTERN:
+  sed -i '/pattern/i\\    new line before' /workspace/file.py
+  sed -i '/pattern/a\\    new line after' /workspace/file.py
+
+DELETE LINES:
+  sed -i '/pattern/d' /workspace/file.py  # delete lines matching pattern
+  sed -i '5d' /workspace/file.py  # delete line 5
+  sed -i '5,10d' /workspace/file.py  # delete lines 5-10
+
+MULTIPLE EDITS:
+  sed -i -e 's/old1/new1/' -e 's/old2/new2/' /workspace/file.py
+
+EXAMPLES:
+  # Add import at top
+  sed -i '1i\\import numpy as np' /workspace/script.py
+  
+  # Change function name
+  sed -i 's/def old_func(/def new_func(/' /workspace/script.py
+  
+  # Add line after class definition
+  sed -i '/class MyClass:/a\\    # New docstring' /workspace/script.py
+  
+  # Remove debug prints
+  sed -i '/print("debug/d' /workspace/script.py
+
+⚠️ ALWAYS use -i flag for in-place editing!
+⚠️ Test pattern first: sed -n '/pattern/p' file.py (shows matches without editing)
+
+ADVANCED sed PATTERNS:
+  # Add multiple lines after pattern
+  sed -i '/class MyClass:/a\\    # Docstring\\n    pass' /workspace/file.py
+  
+  # Replace entire function (between two patterns)
+  sed -i '/def old_func/,/^def /c\\def new_func():\\n    return True\\n' /workspace/file.py
+  
+  # Insert import only if not exists
+  grep -q "import numpy" /workspace/file.py || sed -i '1i\\import numpy as np' /workspace/file.py
+  
+  # Change value in config
+  sed -i 's/DEBUG = True/DEBUG = False/' /workspace/settings.py
+  
+  # Add route to Flask app
+  sed -i '/app = Flask/a\\@app.route("/new")\\ndef new(): return "OK"' /workspace/app.py
+
+WHEN TO USE sed vs rewrite:
+  ✓ sed: Change 1-5 lines in 100+ line file
+  ✗ rewrite: Restructure entire file, change 50+ lines
+
 ━━━ HOW TO CREATE DJANGO/FLASK PROJECTS ━━━
 DJANGO:
   execute_command: cd /workspace && django-admin startproject mysite
@@ -170,6 +257,10 @@ FLASK:
   ✗ django-admin startproject name /existing/dir — use WITHOUT target if dir exists
   ✗ zip -r result.zip . — zips everything including hidden files
   ✗ Correct: cd /workspace && zip -r myproject.zip myproject/
+  ✗ Trying to create 200+ line file in one heredoc — SPLIT IT into parts with >>
+  ✗ Correct: Part 1 with >, Parts 2+ with >>
+  ✗ Rewriting entire file to change one line — USE sed -i instead
+  ✗ Correct: sed -i 's/old/new/' file.py
 
 ━━━ COMPLETION SEQUENCE ━━━
 Step 1: Create project in /workspace/
@@ -219,6 +310,7 @@ For document/presentation tasks:
 For action tasks:
   - Call tools immediately. Do NOT just describe steps.
   - Create project files in /workspace/ using execute_command with heredoc.
+  - Edit files with sed: sed -i 's/old/new/' file.py (don't rewrite entire file!)
   - install_packages for installing packages (never apt-get/pip in execute_command).
   - Finish with: zip project → deliver_file.
 
