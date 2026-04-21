@@ -8,7 +8,7 @@ from typing import Callable
 CONTAINER_NAME = "quadrogent-sandbox"
 IMAGE = "ubuntu:22.04"
 
-INIT_PACKAGES = "curl wget zip unzip git python3 python3-pip python3-venv nano jq psmisc lsof"
+INIT_PACKAGES = "curl wget zip unzip git python3 python3-pip python3-venv python3-dev build-essential nano jq psmisc lsof"
 
 APT_ENV = {
     "DEBIAN_FRONTEND": "noninteractive",
@@ -298,6 +298,21 @@ class DockerManager:
 
         # Ensure workspace dirs exist, clean up stale uploads/ from old versions
         self._exec("mkdir -p /workspace/tmp && rm -rf /workspace/uploads")
+
+        # Install Python libraries for document generation
+        self._log("info", "─── Установка библиотек для работы с документами ───")
+        doc_libs = "python-pptx python-docx reportlab Pillow"
+        self._log("cmd", f"pip3 install {doc_libs}")
+        code, out = self._exec(
+            f"pip3 install --no-cache-dir {doc_libs} 2>&1",
+            timeout=180
+        )
+        if code == 0:
+            self._log("ok", "Библиотеки установлены: python-pptx, python-docx, reportlab, Pillow")
+        else:
+            self._log("warn", f"Установка библиотек завершилась с кодом {code}")
+            if out.strip():
+                self._log("out", out.strip())
 
         self._log("info", "─── Проверка установленных инструментов ──────")
         all_ok = True
