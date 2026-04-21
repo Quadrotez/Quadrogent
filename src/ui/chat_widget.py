@@ -39,7 +39,7 @@ def _message_css() -> str:
 body {
     background: #f5f5f5;
     color: #222222;
-    font-family: "Roboto", "Inter", system-ui, sans-serif;
+    font-family: "Roboto", "Inter", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", system-ui, sans-serif;
     font-size: 14px;
     line-height: 1.7;
     padding: 16px 0 12px 0;
