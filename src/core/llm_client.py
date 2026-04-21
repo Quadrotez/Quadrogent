@@ -431,6 +431,7 @@ class LLMClient:
         tool_choice: str = "auto",
         work_mode: bool = False,   # selects WORK_TOOLS vs AUTO_TOOLS
         use_web_search: bool = True,
+        max_tokens: int | None = None,  # limit response length
     ) -> dict | Generator:
         payload: dict = {
             "messages": messages,
@@ -439,6 +440,8 @@ class LLMClient:
         }
         if self.model:
             payload["model"] = self.model
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         if use_tools:
             if work_mode:
                 payload["tools"] = WORK_TOOLS

@@ -254,7 +254,11 @@ class WebSearch:
                 if r.get("url"):
                     page_text = _fetch_page(r["url"], proxy)
                     if page_text and not page_text.startswith("[Error"):
-                        r["snippet"] = (r.get("snippet", "") + "\n\n" + page_text[:600]).strip()
+                        # Добавляем маркер чтобы модель видела что это контент страницы
+                        r["snippet"] = (
+                            r.get("snippet", "") + 
+                            f"\n\n[Page content:]\n{page_text[:800]}"
+                        ).strip()
 
         return results
 

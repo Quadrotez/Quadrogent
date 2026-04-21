@@ -11,6 +11,8 @@ import json
 import os
 import re
 import shutil
+import time
+import base64
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
@@ -376,26 +378,46 @@ def _error_row(content_html: str) -> str:
 _BRAIN_COLORS = ["#333333", "#888888", "#dddddd", "#888888"]
 
 
+# Pulsing palette for the thinking header (subtle dark-to-light breath).
+_THINK_PULSE = ["#4a4a4a", "#6b6b6b", "#9a9a9a", "#c4c4c4", "#9a9a9a", "#6b6b6b"]
+
+# Fading palette for streaming think lines (older → darker, newest → brightest).
+_THINK_LINE_FADE = ["#2c2c2c", "#3e3e3e", "#535353", "#6e6e6e", "#8a8a8a", "#a8a8a8"]
+
+
+def _icon_data_uri(icon_name: str, color: str) -> str:
+    """Return a data: URI for an SVG icon recolored to the given hex color.
+
+    Returns an empty string if the icon can't be located — caller must handle fallback.
+    """
+    try:
+        from src.utils.static_paths import icon as _icon_path
+        icon_path = _icon_path(icon_name)
+    except Exception:
+        icon_path = ""
+    if not icon_path or not os.path.exists(icon_path):
+        return ""
+    try:
+        with open(icon_path, "r", encoding="utf-8") as f:
+            svg = f.read().replace("currentColor", color)
+        b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{b64}"
+    except Exception:
+        return ""
+
+
 def _brain_avatar(frame: int = 0) -> str:
     """Pulsing academic-cap icon during thinking."""
     color = _BRAIN_COLORS[frame % len(_BRAIN_COLORS)]
-    try:
-        from src.utils.static_paths import icon as _icon_path
-        icon_path = _icon_path("academic-cap")
-        if not __import__("os").path.exists(icon_path):
-            icon_path = _icon_path("cpu-chip")
-    except Exception:
-        icon_path = ""
-    if os.path.exists(icon_path):
-        svg = open(icon_path).read().replace("currentColor", color)
-        # Encode as data URI for QTextBrowser
-        import base64
-        b64 = base64.b64encode(svg.encode()).decode()
+    uri = _icon_data_uri("academic-cap", color)
+    if not uri:
+        uri = _icon_data_uri("cpu-chip", color)
+    if uri:
         return (
             f'<div style="width:26px;height:26px;min-width:26px;'
             f'background:{C["avatar_bg"]};border:1px solid {C["avatar_border"]};'
             f'border-radius:6px;text-align:center;line-height:26px;margin-top:2px;">'
-            f'<img src="data:image/svg+xml;base64,{b64}" width="16" height="16" '
+            f'<img src="{uri}" width="16" height="16" '
             f'style="margin-top:5px;vertical-align:middle;"/>'
             f'</div>'
         )
@@ -422,6 +444,87 @@ def _thinking_row(frame: int = 0) -> str:
         f'<td valign="middle" style="padding:4px 0 0 6px;">{dots}</td>'
         f'</tr>'
         f'</table>'
+    )
+
+
+def _thinking_live_panel(think_text: str, frame: int, elapsed_sec: int) -> str:
+    """Beautiful live think-panel shown WHILE the model reasons.
+
+    Renders:
+      • A left accent bar (pulsing subtle color)
+      • A header row with a small sparkles icon + "Размышление" + elapsed seconds
+      • Last few lines of the reasoning fade from dark to bright (newest on bottom is brightest)
+    """
+    # Pulsing accent colors.
+    pulse = _THINK_PULSE[frame % len(_THINK_PULSE)]
+    header_icon = _icon_data_uri("sparkles", pulse) or _icon_data_uri("light-bulb", pulse)
+
+    # Extract meaningful tail of thinking content.
+    lines = [l for l in think_text.strip().replace("\r", "").split("\n") if l.strip()]
+    tail = lines[-6:]  # up to 6 most recent non-empty lines
+    # Map fade colors: oldest line → darkest, newest → brightest.
+    start = len(_THINK_LINE_FADE) - len(tail)
+    if start < 0:
+        start = 0
+    fade_slice = _THINK_LINE_FADE[start:start + len(tail)] if tail else []
+
+    # Build the fade lines as a stack (newest at bottom).
+    line_html = ""
+    for line, col in zip(tail, fade_slice):
+        # Limit very long lines so the panel doesn't explode vertically.
+        trimmed = line.strip()
+        if len(trimmed) > 220:
+            trimmed = trimmed[:217] + "…"
+        line_html += (
+            f'<div style="color:{col};font-size:11.5px;font-family:{MONO};'
+            f'font-style:italic;line-height:1.55;padding:1px 0;'
+            f'word-wrap:break-word;white-space:pre-wrap;">'
+            f'{html.escape(trimmed)}</div>'
+        )
+    if not line_html:
+        line_html = (
+            f'<div style="color:{C["tool_body_txt"]};font-size:11px;'
+            f'font-family:{MONO};font-style:italic;">подбираю мысли…</div>'
+        )
+
+    # Animated dots cycle.
+    dot_colors = ["#4a4a4a", "#707070", "#a0a0a0"]
+    dots = "".join(
+        f'<span style="color:{dot_colors[(frame + i) % 3]};font-size:14px;'
+        f'letter-spacing:2px;">&#8226;</span>'
+        for i in range(3)
+    )
+
+    # Header row with icon + title + timer + dots.
+    mm, ss = divmod(max(0, int(elapsed_sec)), 60)
+    timer_str = f"{mm}:{ss:02d}" if mm else f"{ss} с"
+    if header_icon:
+        icon_html = (
+            f'<img src="{header_icon}" width="12" height="12" '
+            f'style="vertical-align:middle;margin-right:5px;"/>'
+        )
+    else:
+        icon_html = ""
+
+    return (
+        f'<div style="border-left:3px solid {pulse};background:{C["tool_body_bg"]};'
+        f'border-top:1px solid {C["tool_body_bd"]};'
+        f'border-right:1px solid {C["tool_body_bd"]};'
+        f'border-bottom:1px solid {C["tool_body_bd"]};'
+        f'border-radius:0 7px 7px 0;padding:8px 12px 9px 12px;margin-bottom:8px;">'
+        # Header
+        f'<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:4px;">'
+        f'<tr>'
+        f'<td align="left" style="color:{pulse};font-size:10px;font-family:{MONO};'
+        f'text-transform:uppercase;letter-spacing:1.2px;font-weight:600;">'
+        f'{icon_html}Размышление · {timer_str}'
+        f'</td>'
+        f'<td align="right" style="padding-left:8px;">{dots}</td>'
+        f'</tr>'
+        f'</table>'
+        # Fading content
+        f'{line_html}'
+        f'</div>'
     )
 
 
@@ -584,6 +687,64 @@ def _md_to_html(text: str) -> str:
         p = re.sub(r"(?m)^&gt;\s*(.+)$",
             f'<div style="border-left:2px solid #242424;padding:4px 12px;'
             f'color:#606060;margin:8px 0;font-style:italic;">\\1</div>', p)
+        
+        # Markdown tables (GFM format: | cell | cell |)
+        # Match consecutive table rows
+        table_lines_pattern = r'(?m)(^\|.+\|$\n)+'
+        def _render_table(match):
+            lines = [l.strip() for l in match.group(0).strip().split('\n') if l.strip()]
+            if len(lines) < 2:
+                return match.group(0)  # Not a valid table
+            
+            # Parse rows
+            rows = []
+            separator_idx = None
+            for i, line in enumerate(lines):
+                cells = [c.strip() for c in line.strip('|').split('|')]
+                # Check if this is a separator row (---|---|---)
+                if all(re.match(r'^:?-+:?$', c.strip()) for c in cells if c.strip()):
+                    separator_idx = i
+                    continue
+                rows.append(cells)
+            
+            if not rows:
+                return match.group(0)
+            
+            # Build HTML table
+            table_html = (
+                f'<table style="border-collapse:collapse;margin:8px 0;'
+                f'border:1px solid {C["tool_body_bd"]};width:auto;max-width:100%;">'
+            )
+            
+            # Header row (first row before separator, or just first row)
+            header = rows[0]
+            table_html += '<tr>'
+            for cell in header:
+                table_html += (
+                    f'<th style="border:1px solid {C["tool_body_bd"]};'
+                    f'padding:6px 12px;background:{C["code_lang_bg"]};'
+                    f'color:{C["asst_text"]};font-weight:600;text-align:left;">'
+                    f'{cell}</th>'
+                )
+            table_html += '</tr>'
+            
+            # Body rows
+            for row in rows[1:]:
+                table_html += '<tr>'
+                for cell in row:
+                    table_html += (
+                        f'<td style="border:1px solid {C["tool_body_bd"]};'
+                        f'padding:6px 12px;color:{C["asst_text"]};">'
+                        f'{cell}</td>'
+                    )
+                table_html += '</tr>'
+            
+            table_html += '</table>'
+            return table_html
+        
+        p = re.sub(table_lines_pattern, _render_table, p)
+        
+        # Списки
         p = re.sub(r"(?m)^[\*\-]\s+(.+)$", r"<li>\1</li>", p)
         p = re.sub(r"(?m)^\d+\.\s+(.+)$",  r"<li>\1</li>", p)
         p = re.sub(
@@ -591,7 +752,15 @@ def _md_to_html(text: str) -> str:
             lambda m: f'<ul style="padding-left:20px;margin:5px 0;">' + m.group(0) + "</ul>",
             p, flags=re.DOTALL,
         )
+        
+        # Параграфы: двойной перенос = разделитель абзацев (мелкий margin),
+        # одинарный перенос = мягкий перенос (просто <br>).
+        # Заменяем \n\n на маркер, чтобы потом обработать отдельно.
+        p = p.replace("\n\n", "\x00PARA\x00")
         p = p.replace("\n", "<br>")
+        # Теперь \x00PARA\x00 превращаем в межабзацный отступ (6px вместо 14px)
+        p = p.replace("\x00PARA\x00", '<div style="margin:6px 0;"></div>')
+        
         result.append(p)
     return "".join(result)
 
@@ -1062,12 +1231,23 @@ class QuickSettingsPanel(QWidget):
 
 
 class _ChatBrowser(QTextBrowser):
-    """QTextBrowser subclass that reliably fires anchorClicked for ALL schemes."""
+    """QTextBrowser subclass that reliably fires anchor events for ALL schemes.
+
+    IMPORTANT: QUrl normalization silently mangles numeric hosts — e.g.
+    QUrl("think://1") parses as "think://0.0.0.1" on many Qt builds (IPv4 coercion),
+    which broke our toggle handler. We therefore also emit the RAW anchor string
+    via `anchorStrClicked`, which the ChatWidget uses for `think://N` URIs.
+    """
+    anchorStrClicked = pyqtSignal(str)
+
     def mousePressEvent(self, e):
         # Get anchor at click position BEFORE calling super (which may swallow it)
         anchor = self.anchorAt(e.pos())
         if anchor:
             from PyQt5.QtCore import QUrl
+            # Emit both: the raw string (for `think://N` and similar numeric
+            # hosts) and the QUrl (for file/http handling elsewhere).
+            self.anchorStrClicked.emit(anchor)
             self.anchorClicked.emit(QUrl(anchor))
             return  # don't let super navigate
         super().mousePressEvent(e)
@@ -1105,6 +1285,8 @@ class ChatWidget(QWidget):
         self._fade_next: bool = False  # fade in on next full render (chat switch)
         self._think_store:    dict[int, str] = {}   # idx → raw think content
         self._think_expanded: set[int] = set()       # indices with expanded think blocks
+        self._think_durations: dict[int, int] = {}   # idx → seconds spent thinking
+        self._think_started_at: float = 0.0           # monotonic ts when current stream started
 
         self._stream_timer = QTimer(self)
         self._stream_timer.setInterval(self._STREAM_INTERVAL_MS)
@@ -1190,6 +1372,11 @@ class ChatWidget(QWidget):
         self.browser.setObjectName("chatBrowser")
         self.browser.setOpenLinks(False)
         self.browser.setOpenExternalLinks(False)
+        # anchorStrClicked is our own signal that carries the RAW anchor string.
+        # We prefer it for think:// URIs because QUrl mangles numeric hosts
+        # (e.g. QUrl("think://1") → "think://0.0.0.1"). anchorClicked is still
+        # connected as a safety net for external schemes.
+        self.browser.anchorStrClicked.connect(self._on_anchor_str_clicked)
         self.browser.anchorClicked.connect(self._on_link_clicked)
         self.browser.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -1363,11 +1550,29 @@ class ChatWidget(QWidget):
 
     def _show_export_menu(self):
         menu = QMenu(self)
-        menu.addAction("🌐  HTML",       lambda: self.export_chat.emit("html"))
-        menu.addAction("📄  TXT",        lambda: self.export_chat.emit("txt"))
-        menu.addAction("📋  JSON",       lambda: self.export_chat.emit("json"))
+        
+        # HTML export
+        html_action = menu.addAction("HTML")
+        apply_icon(html_action, "globe-alt")
+        html_action.triggered.connect(lambda: self.export_chat.emit("html"))
+        
+        # TXT export
+        txt_action = menu.addAction("TXT")
+        apply_icon(txt_action, "document-text")
+        txt_action.triggered.connect(lambda: self.export_chat.emit("txt"))
+        
+        # JSON export
+        json_action = menu.addAction("JSON")
+        apply_icon(json_action, "code-bracket")
+        json_action.triggered.connect(lambda: self.export_chat.emit("json"))
+        
         menu.addSeparator()
-        menu.addAction("🔧  Dev Logs",   lambda: self.export_chat.emit("devlogs"))
+        
+        # Dev logs
+        dev_action = menu.addAction("Dev Logs")
+        apply_icon(dev_action, "wrench-screwdriver")
+        dev_action.triggered.connect(lambda: self.export_chat.emit("devlogs"))
+        
         menu.exec_(self._export_btn.mapToGlobal(self._export_btn.rect().bottomLeft()))
 
     def set_chat_title(self, title: str):
@@ -1380,20 +1585,39 @@ class ChatWidget(QWidget):
 
     # ── Link handler ──────────────────────────────────────
 
-    def _on_link_clicked(self, url: QUrl):
-        if url.scheme() == "think":
-            try:
-                idx = int(url.host())
-            except (ValueError, AttributeError):
-                return
+    def _on_anchor_str_clicked(self, anchor: str):
+        """Handle clicks using the RAW anchor string.
+
+        Needed because QUrl silently mangles numeric hosts —
+        QUrl("think://1") becomes "think://0.0.0.1" (IPv4 coercion) on many
+        Qt builds, which made int(url.host()) produce the wrong index and
+        broke the think-block toggle. Parsing the raw string sidesteps this.
+        """
+        if not anchor:
+            return
+        # think://N — toggle expand/collapse for reasoning block N.
+        m = re.match(r'^think://(\d+)$', anchor.strip())
+        if m:
+            idx = int(m.group(1))
             if idx in self._think_expanded:
                 self._think_expanded.discard(idx)
             else:
                 self._think_expanded.add(idx)
-            # Rebuild messages_html with updated think block
             self._rebuild_think_blocks()
             return
-        if url.scheme() == "file":
+        # Anything else — let the QUrl-based handler deal with it
+        # (it's also wired to anchorClicked, so do nothing here to avoid
+        # double-handling file:// or http:// URLs).
+        return
+
+    def _on_link_clicked(self, url: QUrl):
+        # Ignore think:// here — it's handled by _on_anchor_str_clicked,
+        # which uses the raw anchor string and isn't affected by QUrl's
+        # IPv4 coercion of numeric hosts.
+        scheme = url.scheme() or ""
+        if scheme == "think":
+            return
+        if scheme == "file":
             abs_path = url.toLocalFile()
             if not os.path.exists(abs_path):
                 self.status_label.setText(f"Файл не найден: {os.path.basename(abs_path)}")
@@ -1405,47 +1629,36 @@ class ChatWidget(QWidget):
                     self.status_label.setText(f"Сохранено: {dest}")
                 except Exception as e:
                     self.status_label.setText(f"Ошибка: {e}")
-        else:
-            QDesktopServices.openUrl(url)
+            return
+        # Fallback: hand off to the OS (http, https, mailto, etc.).
+        QDesktopServices.openUrl(url)
 
     def _rebuild_think_blocks(self):
-        """Rebuild _messages_html replacing think blocks using href anchors."""
-        import re as _re
-        html = self._messages_html
+        """Rebuild _messages_html by replacing each think block between its markers.
+
+        We wrap generated think blocks in `<!--THINK-START-N-->…<!--THINK-END-N-->`
+        so we can find exact boundaries without fragile <div>-depth counting.
+        """
+        html_src = self._messages_html
         for idx, tc in self._think_store.items():
-            # Find the think div by its unique href="think://N"
-            anchor = f'href="think://{idx}"'
-            pos = html.find(anchor)
-            if pos == -1:
+            start_marker = f"<!--THINK-START-{idx}-->"
+            end_marker = f"<!--THINK-END-{idx}-->"
+            s = html_src.find(start_marker)
+            if s == -1:
                 continue
-            # Walk back to find the opening <div of this block
-            div_start = html.rfind('<div', 0, pos)
-            if div_start == -1:
+            e = html_src.find(end_marker, s)
+            if e == -1:
                 continue
-            # Walk forward to find the matching </div>
-            # Count nested divs
-            depth = 0
-            i = div_start
-            div_end = -1
-            while i < len(html):
-                if html[i:i+4] == '<div':
-                    depth += 1
-                    i += 4
-                elif html[i:i+6] == '</div>':
-                    depth -= 1
-                    if depth == 0:
-                        div_end = i + 6
-                        break
-                    i += 6
-                else:
-                    i += 1
-            if div_end == -1:
-                continue
+            block_end = e + len(end_marker)
             expanded = idx in self._think_expanded
             new_block = self._make_think_block(idx, tc, expanded)
-            html = html[:div_start] + new_block + html[div_end:]
-        self._messages_html = html
+            html_src = html_src[:s] + new_block + html_src[block_end:]
+        self._messages_html = html_src
         self._render()
+        # Force Qt to process events immediately so the UI updates before
+        # the user's next action (otherwise the toggle feels unresponsive).
+        QApplication.processEvents()
+
 
     # ── File chip ─────────────────────────────────────────
 
@@ -1467,7 +1680,13 @@ class ChatWidget(QWidget):
         chip.removed.connect(lambda fn=filename: self._remove_chip(fn))
         self._chip_row.addWidget(chip)
         self._chip_row.addStretch(1)
-        self.check_vision_warning()
+        # Check for vision warning if handler is defined elsewhere; safe no-op otherwise.
+        _vw = getattr(self, "check_vision_warning", None)
+        if callable(_vw):
+            try:
+                _vw()
+            except Exception:
+                pass
         self.input.setFocus()
 
     # Keep backward compat
@@ -1570,9 +1789,21 @@ class ChatWidget(QWidget):
         self._think_timer.stop()
 
     def _tick_think(self):
+        # Advance the pulse frame in two situations:
+        #   1. The pre-stream "thinking" row is shown → re-render it.
+        #   2. A stream is in progress AND contains reasoning content → the
+        #      live think-panel should breathe even between chunks.
         if self._is_thinking:
             self._think_frame += 1
             self._render_with_thinking()
+            return
+        if self._stream_timer.isActive() and self._streaming_text:
+            # Only re-render if the model is currently inside a reasoning span.
+            tc, _vis = self._split_think(self._streaming_text)
+            if tc:
+                self._think_frame += 1
+                # Re-render using the latest streamed text (no new chunk needed).
+                self._rerender_stream()
 
     def set_persistent(self, is_persistent: bool):
         self._is_persistent = is_persistent
@@ -1644,41 +1875,106 @@ class ChatWidget(QWidget):
         self._streaming_text = ""
         self._streaming_base = self._messages_html
         self._stream_buffer  = ""
+        # Track when reasoning started so we can show elapsed time in the
+        # live think-panel and record total duration in the final collapsed header.
+        self._think_started_at = time.monotonic()
         self._stream_timer.start()
+        # Run the pulse/dots animation during streaming too so the live
+        # think-panel breathes even when chunks arrive in bursts.
+        if not self._think_timer.isActive():
+            self._think_timer.start()
 
     def append_stream(self, chunk: str):
         self._stream_buffer += chunk
 
     def _make_think_block(self, idx: int, think_text: str, expanded: bool) -> str:
         """Build the think-block HTML for a given message index.
-        Uses only static HTML (no JS) — toggling is done via Python on anchor click.
+
+        Uses HTML comment markers so `_rebuild_think_blocks` can safely find the
+        exact boundaries of this block (no brittle <div> nesting math).
+        Toggling is handled in Python via anchorClicked.
         """
-        label_color = C["tool_body_txt"]
+        # Compute some cheap stats for the label.
+        clean = think_text.strip()
+        line_count = len([l for l in clean.split("\n") if l.strip()]) if clean else 0
+        elapsed = int(self._think_durations.get(idx, 0) or 0)
+        # Build a compact human-readable suffix: "12 с · 34 строки" (or similar).
+        def _ru_line_word(n: int) -> str:
+            n = abs(n) % 100
+            if 11 <= n <= 14:
+                return "строк"
+            last = n % 10
+            if last == 1:
+                return "строка"
+            if 2 <= last <= 4:
+                return "строки"
+            return "строк"
+        meta_bits = []
+        if elapsed > 0:
+            if elapsed >= 60:
+                mm, ss = divmod(elapsed, 60)
+                meta_bits.append(f"{mm}м {ss:02d}с")
+            else:
+                meta_bits.append(f"{elapsed} с")
+        if line_count > 0:
+            meta_bits.append(f"{line_count} {_ru_line_word(line_count)}")
+        meta_str = " · ".join(meta_bits)
+
+        header_color = C["tool_body_txt"]
+        accent_color = C.get("code_lang_txt", "#888") or "#888"
+
+        # Small sparkles icon (recolored to the accent) for the header.
+        header_icon_uri = _icon_data_uri("sparkles", accent_color) or _icon_data_uri("academic-cap", accent_color)
+        if header_icon_uri:
+            icon_html = (
+                f'<img src="{header_icon_uri}" width="11" height="11" '
+                f'style="vertical-align:middle;margin-right:6px;"/>'
+            )
+        else:
+            icon_html = "&#129504;&nbsp;"  # fallback brain emoji
+
+        arrow = "▾" if expanded else "▸"
+        action_word = "свернуть" if expanded else "развернуть"
+
+        # Content panel shown only when expanded.
         if expanded:
-            tc_esc = html.escape(think_text).replace("\n", "<br>")
+            tc_esc = html.escape(clean).replace("\n", "<br>")
+            # EXPANDED: use a visually distinct panel with slightly lighter
+            # background and larger text so it's obvious the block opened.
             inner = (
-                f'<div style="color:{C["code_txt"]};font-size:11px;'
-                f'font-family:{MONO};margin-top:6px;padding-top:6px;'
-                f'border-top:1px solid {C["user_border"]};line-height:1.6;">'
+                f'<div style="color:{C["code_txt"]};font-size:12.5px;'
+                f'font-family:{MONO};margin-top:9px;padding:10px 12px;'
+                f'border-top:2px solid {C["avatar_border"]};'  # thicker border
+                f'background:rgba(255,255,255,0.02);'  # subtle highlight
+                f'border-radius:4px;'
+                f'line-height:1.7;'
+                f'white-space:pre-wrap;word-wrap:break-word;">'
                 f'{tc_esc}</div>'
             )
-            arrow = "▾"
         else:
             inner = ""
-            arrow = "▸"
+
+        meta_html = (
+            f'<span style="color:{accent_color};opacity:0.7;">&nbsp;·&nbsp;{html.escape(meta_str)}</span>'
+            if meta_str else ""
+        )
+
+        # Wrap in marker comments — `_rebuild_think_blocks` finds by these markers.
         return (
-            ''
-            f'<div style="border-left:2px solid {C["avatar_border"]};margin-bottom:8px;'
-            f'padding:5px 10px;border-radius:0 4px 4px 0;background:{C["tool_body_bg"]};">'
-            f'<a href="think://{idx}" style="color:{label_color};font-size:10px;'
-            f'font-family:{MONO};text-transform:uppercase;letter-spacing:0.8px;'
-            f'text-decoration:none;">'
-            f'&#129504; {arrow} думал — {"свернуть" if expanded else "развернуть"}'
+            f"<!--THINK-START-{idx}-->"
+            f'<div style="border-left:2px solid {C["avatar_border"]};margin:3px 0 8px 0;'
+            f'padding:6px 11px;border-radius:0 5px 5px 0;background:{C["tool_body_bg"]};">'
+            f'<a href="think://{idx}" style="color:{header_color};font-size:10px;'
+            f'font-family:{MONO};text-transform:uppercase;letter-spacing:0.9px;'
+            f'text-decoration:none;font-weight:600;">'
+            f'{icon_html}{arrow}&nbsp;думал — {action_word}'
+            f'{meta_html}'
             f'</a>'
             f'{inner}'
             f'</div>'
-            ''
+            f"<!--THINK-END-{idx}-->"
         )
+
 
     @staticmethod
     def _split_think(text: str):
@@ -1691,6 +1987,10 @@ class ChatWidget(QWidget):
         4. <thinking>...</thinking> — alternate tag name
         """
         import re as _re
+        
+        # Defensive: if text is None or not a string, return empty
+        if not text or not isinstance(text, str):
+            return "", ""
 
         # ── Case 1: properly wrapped <think>...</think> ─────────────────────────
         if _re.search(r'<think>.*?</think>', text, _re.DOTALL | _re.IGNORECASE) or            _re.search(r'<thinking>.*?</thinking>', text, _re.DOTALL | _re.IGNORECASE):
@@ -1728,8 +2028,18 @@ class ChatWidget(QWidget):
             return
         self._streaming_text += self._stream_buffer
         self._stream_buffer   = ""
+        self._rerender_stream()
+
+    def _rerender_stream(self):
+        """Re-render the currently-streaming assistant bubble from `self._streaming_text`.
+
+        Separated from `_flush_stream` so the pulse timer can also drive redraws
+        (keeps the live think-panel breathing even when no new chunk arrives).
+        """
+        if not self._streaming_text and not self._stream_buffer:
+            return
         think_content, visible = self._split_think(self._streaming_text)
-        # Build display HTML
+        # Build display HTML for the visible (post-reasoning) part.
         if visible:
             escaped = html.escape(visible).replace("\n", "<br>")
         else:
@@ -1740,51 +2050,58 @@ class ChatWidget(QWidget):
         )
         think_html = ""
         if think_content:
-            # During streaming: show last 3 lines of thinking as live preview
-            preview_lines = think_content.strip().split("\n")[-3:]
-            preview = " ".join(l.strip() for l in preview_lines if l.strip())[:200]
-            think_html = (
-                f'<div style="border-left:2px solid {C["avatar_border"]};padding:5px 10px;'
-                f'margin-bottom:6px;border-radius:0 4px 4px 0;background:{C["tool_body_bg"]};">'
-                f'<span style="color:{C["code_lang_txt"]};font-size:9.5px;letter-spacing:0.8px;'
-                f'text-transform:uppercase;display:block;margin-bottom:3px;'
-                f'font-family:{MONO};">&#129504; думает&#x2026;</span>'
-                f'<span style="color:{C["tool_body_txt"]};font-size:11px;font-family:{MONO};'
-                f'font-style:italic;">{html.escape(preview)}</span>'
-                f'</div>'
-            )
+            # Use the beautifully-styled live panel with breathing pulse +
+            # fading tail of the last few reasoning lines.
+            elapsed = 0
+            if self._think_started_at:
+                elapsed = int(time.monotonic() - self._think_started_at)
+            think_html = _thinking_live_panel(think_content, self._think_frame, elapsed)
         block = _asst_bubble(think_html + escaped + cursor_span)
         self.browser.setHtml(_message_css() + f"<body>{self._streaming_base}{block}</body>")
         self._scroll_bottom()
 
     def end_stream(self):
-        self._stream_timer.stop()
-        if self._stream_buffer:
-            self._streaming_text += self._stream_buffer
-            self._stream_buffer   = ""
-        if self._streaming_text:
-            import re as _re
-            think_content, visible = self._split_think(self._streaming_text)
-            think_parts = [think_content] if think_content else []
-            # Build collapsible think block
-            think_html = ""
-            if think_parts:
-                tc = "\n---\n".join(think_parts)
-                tc_esc = html.escape(tc).replace("\n", "<br>")
-                n = len(self._raw_messages)
-                # Store think content so Python-side toggle can re-render it
-                self._think_store[n] = tc
-                is_expanded = n in self._think_expanded
-                think_html = self._make_think_block(n, tc, is_expanded)
-            rendered = _md_to_html(visible) if visible else ""
-            self._messages_html = self._streaming_base + _asst_bubble(think_html + rendered)
-            self._raw_messages.append({
-                "role": "assistant", "content": visible,
-                "ts": datetime.now().isoformat(),
-            })
-            self._render()
-        self._streaming_text = ""
-        self._streaming_base = ""
+        try:
+            self._stream_timer.stop()
+            # Stop the pulse timer
+            if self._think_timer.isActive() and not self._is_thinking:
+                self._think_timer.stop()
+            if self._stream_buffer:
+                self._streaming_text += self._stream_buffer
+                self._stream_buffer   = ""
+            if self._streaming_text:
+                think_content, visible = self._split_think(self._streaming_text)
+                think_parts = [think_content] if think_content else []
+                # Build collapsible think block
+                think_html = ""
+                if think_parts:
+                    tc = "\n---\n".join(think_parts)
+                    n = len(self._raw_messages)
+                    if self._think_started_at:
+                        self._think_durations[n] = max(
+                            0, int(time.monotonic() - self._think_started_at)
+                        )
+                    self._think_store[n] = tc
+                    is_expanded = n in self._think_expanded
+                    think_html = self._make_think_block(n, tc, is_expanded)
+                rendered = _md_to_html(visible) if visible else ""
+                self._messages_html = self._streaming_base + _asst_bubble(think_html + rendered)
+                # Save FULL text (with <think> tags) so it can be restored on load
+                self._raw_messages.append({
+                    "role": "assistant",
+                    "content": self._streaming_text,  # Full text with <think>
+                    "ts": datetime.now().isoformat(),
+                })
+                self._render()
+        except Exception as e:
+            print(f"[ERROR] end_stream failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Always clean up state
+            self._streaming_text = ""
+            self._streaming_base = ""
+            self._think_started_at = 0.0
 
     # ── Private render ────────────────────────────────────
 
@@ -1822,8 +2139,21 @@ class ChatWidget(QWidget):
             escaped = html.escape(content).replace("\n", "<br>")
             self._messages_html += _error_row(escaped)
         else:
-            rendered = _md_to_html(content)
-            self._messages_html += _asst_bubble(rendered)
+            # Assistant message — check for <think> tags (restored from DB)
+            think_content, visible = self._split_think(content)
+            if think_content:
+                # This message contains reasoning — store it for toggle
+                idx = len(self._raw_messages)
+                self._think_store[idx] = think_content
+                self._think_durations[idx] = 0  # unknown for loaded messages
+                is_expanded = idx in self._think_expanded
+                think_html = self._make_think_block(idx, think_content, is_expanded)
+                rendered = _md_to_html(visible) if visible else ""
+                self._messages_html += _asst_bubble(think_html + rendered)
+            else:
+                # No thinking — just render normally
+                rendered = _md_to_html(content)
+                self._messages_html += _asst_bubble(rendered)
             if _record:
                 self._raw_messages.append({"role": "assistant", "content": content, "ts": ts or datetime.now().isoformat()})
         self._render()
@@ -1848,6 +2178,11 @@ class ChatWidget(QWidget):
         extra = _thinking_row(self._think_frame) if self._is_thinking else ""
         html = _message_css() + f"<body>{self._messages_html}{extra}</body>"
         anims_on = getattr(__import__("builtins"), "_quadrogent_animations", True)
+        
+        # Remember scroll position BEFORE rendering
+        sb = self.browser.verticalScrollBar()
+        was_at_bottom = sb.value() >= sb.maximum() - 50  # tolerance of 50px
+        
         if self._fade_next and anims_on:
             self._fade_next = False
             # Fade in: start transparent, animate to full opacity
@@ -1864,12 +2199,21 @@ class ChatWidget(QWidget):
             self._fade_anim = anim  # keep reference
         else:
             self.browser.setHtml(html)
-        if not no_scroll:
+        
+        # Auto-scroll ONLY if user was already at bottom (or close to it)
+        if not no_scroll and was_at_bottom:
             self._scroll_bottom()
 
     def _render_with_thinking(self):
+        # Check if user was at bottom before rendering
+        sb = self.browser.verticalScrollBar()
+        was_at_bottom = sb.value() >= sb.maximum() - 50
+        
         self.browser.setHtml(_message_css() + f"<body>{self._messages_html}{_thinking_row(self._think_frame)}</body>")
-        self._scroll_bottom()
+        
+        # Auto-scroll only if user was at bottom
+        if was_at_bottom:
+            self._scroll_bottom()
 
     def _scroll_bottom(self):
         sb = self.browser.verticalScrollBar()

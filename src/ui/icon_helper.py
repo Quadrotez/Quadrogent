@@ -45,8 +45,10 @@ def get_icon(name: str, color: str = "#888888", size: int = 16) -> QIcon:
 
 
 def apply_icon(btn, name: str, color: str = "#888888", size: int = 15):
-    """Convenience: set icon on a QPushButton."""
+    """Convenience: set icon on a QPushButton or QAction."""
     icon = get_icon(name, color, size)
     if not icon.isNull():
         btn.setIcon(icon)
-        btn.setIconSize(QSize(size, size))
+        # QAction doesn't have setIconSize, only QPushButton/QToolButton do
+        if hasattr(btn, 'setIconSize'):
+            btn.setIconSize(QSize(size, size))

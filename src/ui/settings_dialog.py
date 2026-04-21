@@ -251,6 +251,27 @@ class AppSettingsDialog(QDialog):
         fl2.addRow("Язык ответов:", self.lang_combo)
         vl.addLayout(fl2)
 
+        # ── Token limits for background operations ────────────
+        vl.addWidget(self._section_label("Лимиты токенов (фоновые операции)"))
+        
+        from PyQt5.QtWidgets import QSpinBox
+        fl3 = __import__('PyQt5.QtWidgets', fromlist=['QFormLayout']).QFormLayout()
+        fl3.setSpacing(8)
+        
+        self.title_tokens_spin = QSpinBox()
+        self.title_tokens_spin.setRange(10, 200)
+        self.title_tokens_spin.setValue(int(self.db.get_setting("title_max_tokens", "30")))
+        self.title_tokens_spin.setSuffix(" токенов")
+        fl3.addRow("Генерация заголовка:", self.title_tokens_spin)
+        
+        self.memory_tokens_spin = QSpinBox()
+        self.memory_tokens_spin.setRange(50, 500)
+        self.memory_tokens_spin.setValue(int(self.db.get_setting("memory_max_tokens", "150")))
+        self.memory_tokens_spin.setSuffix(" токенов")
+        fl3.addRow("Сохранение в память:", self.memory_tokens_spin)
+        
+        vl.addLayout(fl3)
+
         # ── Проверка подключения ──────────────────────────
         test_btn = QPushButton("Проверить подключение")
         test_btn.clicked.connect(self._test_connection)
@@ -688,6 +709,8 @@ class AppSettingsDialog(QDialog):
         self.db.set_setting("temperature",   self.temp_edit.text().strip())
         self.db.set_setting("title_mode",    self.title_combo.currentData())
         self.db.set_setting("language",      self.lang_combo.currentData())
+        self.db.set_setting("title_max_tokens",  str(self.title_tokens_spin.value()))
+        self.db.set_setting("memory_max_tokens", str(self.memory_tokens_spin.value()))
         self.db.set_setting("default_persistent",
                             "1" if self.default_persistent.isChecked() else "0")
 

@@ -371,11 +371,12 @@ class Agent:
     def auto_memorize(self, chat_id: int) -> bool:
         """Ask the LLM if the last exchange is worth memorising. Background-safe."""
         db_messages = self.db.get_messages(chat_id)
-        recent = [m for m in db_messages if m["role"] in ("user", "assistant")][-6:]
+        # Берём только последние 4 сообщения (2 пары user-assistant), по 300 символов
+        recent = [m for m in db_messages if m["role"] in ("user", "assistant")][-4:]
         if not recent:
             return False
         conversation = "\n".join(
-            f"{m['role'].upper()}: {m['content'][:400]}" for m in recent
+            f"{m['role'].upper()}: {m['content'][:300]}" for m in recent
         )
         eval_messages2 = [
             {
@@ -406,7 +407,13 @@ class Agent:
             {"role": "user", "content": conversation},
         ]
         try:
-            response = self.llm.chat(eval_messages2, use_tools=False, stream=False)
+            memory_max_tokens = int(self.db.get_setting("memory_max_tokens", "150"))
+            response = self.llm.chat(
+                eval_messages2,
+                use_tools=False,
+                stream=False,
+                max_tokens=memory_max_tokens
+            )
             raw = response.get("content", "").strip()
             raw = re.sub(r"```[a-z]*|```", "", raw).strip()
             data = json.loads(raw)
@@ -777,8 +784,9 @@ class Agent:
 
                 # ── Post-delivery wrap-up ─────────────────────────────────────
                 if delivered:
-                    if display_content.strip():
-                        self.db.add_message(chat_id, "assistant", display_content)
+                    if raw_content.strip():
+                        # Save RAW content (with <think> tags) so it can be restored on load
+                        self.db.add_message(chat_id, "assistant", raw_content)
                     break
 
                 # ── Silent stop detection ─────────────────────────────────────
@@ -796,8 +804,9 @@ class Agent:
 
                 # ── Text-only response in work mode ───────────────────────────
                 if use_tools and not tool_calls:
-                    if display_content.strip():
-                        self.db.add_message(chat_id, "assistant", display_content)
+                    if raw_content.strip():
+                        self.db.add_message(chat_id, "assistant", raw_content)
+                        # For context: still use display_content (without <think>)
                         messages.append({"role": "assistant", "content": display_content})
                     if work_mode:
                         messages.append({"role": "user", "content": _HARD_REFORCE})
@@ -807,8 +816,9 @@ class Agent:
                         break
 
                 # Save reasoning text
-                if display_content.strip():
-                    self.db.add_message(chat_id, "assistant", display_content)
+                if raw_content.strip():
+                    self.db.add_message(chat_id, "assistant", raw_content)
+                    # For context: still use display_content (without <think>)
                     messages.append({"role": "assistant", "content": display_content})
 
                 # ── finish_reason=length: tool call arguments got cut off ─────
@@ -923,7 +933,13 @@ class Agent:
             {"role": "user", "content": user_message[:500]},
         ]
         try:
-            response = self.llm.chat(messages, use_tools=False, stream=False)
+            title_max_tokens = int(self.db.get_setting("title_max_tokens", "30"))
+            response = self.llm.chat(
+                messages,
+                use_tools=False,
+                stream=False,
+                max_tokens=title_max_tokens
+            )
             title = response.get("content", "").strip()
             # Strip quotes and leading/trailing punctuation
             title = title.strip(chr(34) + chr(39)).strip()
@@ -943,7 +959,12 @@ class Agent:
             {"role": "user",    "content": conversation},
         ]
         try:
-            response = self.llm.chat(messages, use_tools=False, stream=False)
+            response = self.llm.chat(
+                messages,
+                use_tools=False,
+                stream=False,
+                max_tokens=300  # summary чата — пара абзацев
+            )
             summary = response.get("content", "").strip()
             if summary:
                 self.db.save_memory(chat_id, summary)
