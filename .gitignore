@@ -1,46 +1,34 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-*.egg
+# Frontend
+## Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Virtual environment
-venv/
-.venv/
-env/
+node_modules
+dist
+dist-ssr
+*.local
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Project specific
-.cache/
-uploads/*
-workspace/*
-!uploads/.gitkeep
-
-# SQLite
-*.db
-*.sqlite3
-
-# OS
+## Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Docker
-docker-agent-data/
-# SQLite journal files
-*.db-journal
-*.db-wal
-*.db-shm
+# Backend
+## Python
+.venv/
+venv/
 __pycache__/
-*.pyc
-.cache/
-workspace/
+
+## Database
+quadrogent.db

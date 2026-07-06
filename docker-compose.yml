@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  quadrogent-sandbox:
+    build:
+      context: ./backend
+      dockerfile: sandbox.Dockerfile
+    container_name: quadrogent-runtime
+    environment:
+      - HOME=/home/quadrogent
+    volumes:
+      - quadrogent-home:/home/quadrogent
+    networks:
+      - quadrogent-network
+    command: tail -f /dev/null
+
+  quadrogent-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quadrogent-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./quadrogent.db
+    volumes:
+      - ./backend:/app
+    networks:
+      - quadrogent-network
+    depends_on:
+      - quadrogent-sandbox
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  quadrogent-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: quadrogent-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    networks:
+      - quadrogent-network
+    depends_on:
+      - quadrogent-backend
+
+volumes:
+  quadrogent-home:
+
+networks:
+  quadrogent-network:
+    driver: bridge
