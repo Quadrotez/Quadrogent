@@ -11,6 +11,7 @@ import openrouter_client
 from openrouter_client import OpenRouterNotConfigured
 from database import async_session
 from models import Chat, Message, ToolCall
+from sandbox_manager import SandboxManager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("quadrogent.chat")
@@ -44,6 +45,7 @@ async def chat(request: ChatRequest):
         try:
             # --- Создаём/находим чат и сохраняем сообщение пользователя ---
             async with async_session() as session:
+                is_new_chat = False
                 if chat_id:
                     chat_obj = await session.get(Chat, chat_id)
                     if not chat_obj:
@@ -51,6 +53,7 @@ async def chat(request: ChatRequest):
                         chat_obj = Chat(id=chat_id, title="Новый чат")
                         session.add(chat_obj)
                         await session.flush()
+                        is_new_chat = True
                 else:
                     # Новый чат: заголовок = первые 50 символов последнего user-сообщения
                     title = "Новый чат"
@@ -61,6 +64,14 @@ async def chat(request: ChatRequest):
                     chat_obj = Chat(title=title)
                     session.add(chat_obj)
                     await session.flush()
+                    is_new_chat = True
+
+                if is_new_chat:
+                    # Песочница общая для всех чатов, поэтому при старте нового чата
+                    # очищаем output — иначе файлы, презентованные в других чатах,
+                    # остаются там и выглядят как "презентованные" в новом чате,
+                    # хотя present для них не вызывался.
+                    SandboxManager.cleanup_output()
 
                 chat_id = chat_obj.id
 

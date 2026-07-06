@@ -76,6 +76,12 @@ class ToolExecutor:
             filename = os.path.basename(path)
             dest = f"/home/quadrogent/output/{filename}"
             
+            # Сначала убираем возможный старый файл/папку с таким же именем в output.
+            # Без этого `cp -r` для директорий не заменяет старое содержимое, а
+            # вкладывает новую папку внутрь старой, из-за чего в output остаются
+            # файлы, которые не презентовались текущим вызовом present.
+            SandboxManager.run_command(f"rm -rf {dest}")
+            
             # Используем cp для презентации
             res = SandboxManager.run_command(f"cp -r {path} {dest}")
             if res.get("exit_code") == 0:
