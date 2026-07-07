@@ -6,18 +6,71 @@ from sandbox_manager import SandboxManager
 logger = logging.getLogger("quadrogent.tools")
 
 class ToolExecutor:
+    # Схемы валидации для инструментов
+    SCHEMAS = {
+        "bash": {"required": ["command"], "optional": ["mode", "tool"]},
+        "create_file": {"required": ["path", "content"], "optional": ["mode", "tool"]},
+        "patch_file": {"required": ["path", "content"], "optional": ["mode", "tool"]},
+        "remove": {"required": ["path"], "optional": ["mode", "tool"]},
+        "makedir": {"required": ["path"], "optional": ["mode", "tool"]},
+        "install": {"required": ["type", "package"], "optional": ["mode", "tool", "update", "virtualenv"]},
+        "present": {"required": ["path"], "optional": ["mode", "tool"]},
+        "zip": {"required": ["path", "output_path"], "optional": ["mode", "tool"]},
+        "unzip": {"required": ["path", "output_path"], "optional": ["mode", "tool"]},
+        "stop": {"required": [], "optional": ["mode", "tool"]},
+        "read_skill": {"required": ["name"], "optional": ["mode", "tool"]}
+    }
+
     @staticmethod
-    async def execute(tool_name: str, args: dict):
+    def get_skill_content(skill_name: str):
+        """Вспомогательный метод для чтения контента скилла."""
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        prompts_dir = os.path.join(current_dir, "prompts")
+        skill_path = os.path.join(prompts_dir, f"{skill_name}.md")
+        
+        if os.path.exists(skill_path):
+            try:
+                with open(skill_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except:
+                return None
+        return None
+
+    @staticmethod
+    async def execute(tool_name: str, args: dict, read_skills: set = None):
         logger.info(f"Выполнение инструмента: {tool_name} с аргументами {args}")
         
+        # 1. Валидация аргументов
+        if tool_name in ToolExecutor.SCHEMAS:
+            schema = ToolExecutor.SCHEMAS[tool_name]
+            missing = [field for field in schema["required"] if field not in args]
+            
+            # Проверка на лишние поля (исключая служебные mode и tool)
+            allowed = set(schema["required"]) | set(schema["optional"])
+            extra = [field for field in args if field not in allowed]
+            
+            if missing or extra:
+                error_msg = f"Ошибка валидации инструмента '{tool_name}':\n"
+                if missing:
+                    error_msg += f"- Отсутствуют обязательные поля: {', '.join(missing)}\n"
+                if extra:
+                    error_msg += f"- Обнаружены лишние или неизвестные поля: {', '.join(extra)}\n"
+                
+                # Если модель не читала этот скилл, прикладываем его
+                if read_skills is not None and tool_name not in read_skills:
+                    skill_content = ToolExecutor.get_skill_content(tool_name)
+                    if skill_content:
+                        error_msg += f"\nПохоже, ты не читал документацию этого инструмента. Вот она:\n\n{skill_content}"
+                
+                return {"error": error_msg, "exit_code": 1}
+
+        # 2. Исполнение
         if tool_name == "bash":
             return SandboxManager.run_command(args.get("command", ""))
         
         elif tool_name == "create_file":
             path = args.get("path")
             content_raw = args.get("content", "")
-            if not path:
-                return {"error": "Путь обязателен", "exit_code": 1}
             
             if isinstance(content_raw, list):
                 content = "\n".join([str(line) for line in content_raw])
@@ -30,8 +83,6 @@ class ToolExecutor:
         elif tool_name == "patch_file":
             path = args.get("path")
             content_raw = args.get("content", "")
-            if not path:
-                return {"error": "Путь обязателен", "exit_code": 1}
             
             if isinstance(content_raw, list):
                 content = "\n".join([str(line) for line in content_raw])
@@ -43,25 +94,21 @@ class ToolExecutor:
             
         elif tool_name == "remove":
             path = args.get("path")
-            if not path:
-                return {"error": "Path is required", "exit_code": 1}
             return SandboxManager.run_command(f"rm -rf {path}")
             
         elif tool_name == "makedir":
             path = args.get("path")
-            if not path:
-                return {"error": "Path is required", "exit_code": 1}
             return SandboxManager.run_command(f"mkdir -p {path}")
             
         elif tool_name == "install":
             pkg_type = args.get("type")
             package = args.get("package")
             venv = args.get("virtualenv")
+            should_update = args.get("update", False)
             
-            if pkg_type == "apt":
-                # Установка пакетов требует прав root. 
-                # Используем полный путь /usr/bin/apt-get чтобы избежать конфликтов с утилитой 'install'
-                cmd = f"DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get update && DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y {package}"
+            if pkg_type == "apk":
+                update_cmd = "apk update && " if should_update else ""
+                cmd = f"{update_cmd}apk add --no-cache {package}"
                 return SandboxManager.run_command(cmd, user="root")
             elif pkg_type == "pip":
                 pip_cmd = f"{venv}/bin/pip" if venv else "pip"
@@ -70,25 +117,30 @@ class ToolExecutor:
             
         elif tool_name == "present":
             path = args.get("path")
-            if not path:
-                return {"error": "Путь обязателен", "exit_code": 1}
-            
-            # Убеждаемся, что директория output существует
             SandboxManager.run_command("mkdir -p /home/quadrogent/output")
             
-            filename = os.path.basename(path)
-            dest = f"/home/quadrogent/output/{filename}"
+            # Проверяем, является ли путь директорией
+            check_dir = SandboxManager.run_command(f"test -d {path}")
+            is_dir = check_dir.get("exit_code") == 0
             
-            # Сначала убираем возможный старый файл/папку с таким же именем в output.
-            # Без этого `cp -r` для директорий не заменяет старое содержимое, а
-            # вкладывает новую папку внутрь старой, из-за чего в output остаются
-            # файлы, которые не презентовались текущим вызовом present.
-            SandboxManager.run_command(f"rm -rf {dest}")
+            filename = os.path.basename(path.rstrip("/"))
             
-            # Используем cp для презентации
-            res = SandboxManager.run_command(f"cp -r {path} {dest}")
+            if is_dir:
+                # Если директория — пакуем в zip
+                zip_filename = f"{filename}.zip"
+                dest = f"/home/quadrogent/output/{zip_filename}"
+                SandboxManager.run_command(f"rm -rf {dest}")
+                # Переходим в родительскую папку, чтобы в архиве не было лишних путей
+                parent_dir = os.path.dirname(path.rstrip("/")) or "."
+                base_name = os.path.basename(path.rstrip("/"))
+                res = SandboxManager.run_command(f"cd {parent_dir} && zip -r {dest} {base_name}")
+            else:
+                # Если файл — просто копируем
+                dest = f"/home/quadrogent/output/{filename}"
+                SandboxManager.run_command(f"rm -rf {dest}")
+                res = SandboxManager.run_command(f"cp {path} {dest}")
+                
             if res.get("exit_code") == 0:
-                # Возвращаем путь относительно корня песочницы для фронтенда
                 return {"stdout": f"Презентовано: {dest}", "exit_code": 0}
             return res
             
@@ -107,27 +159,9 @@ class ToolExecutor:
             
         elif tool_name == "read_skill":
             skill_name = args.get("name")
-            if not skill_name:
-                return {"error": "Skill name is required", "exit_code": 1}
-            
-            # Определяем абсолютный путь к папке prompts относительно текущего файла
-            current_dir = os.path.dirname(os.path.abspath(__file__)) # Это backend/
-            prompts_dir = os.path.join(current_dir, "prompts")
-            
-            skill_path = os.path.join(prompts_dir, f"{skill_name}.md")
-            
-            if not os.path.exists(skill_path):
-                # Пробуем найти без расширения, если вдруг передали с ним
-                if skill_name.endswith(".md"):
-                    skill_path = os.path.join(prompts_dir, skill_name)
-                
-            if os.path.exists(skill_path):
-                try:
-                    with open(skill_path, "r") as f:
-                        content = f.read()
-                    return {"stdout": content, "exit_code": 0}
-                except Exception as e:
-                    return {"error": f"Failed to read skill: {str(e)}", "exit_code": 1}
+            content = ToolExecutor.get_skill_content(skill_name)
+            if content:
+                return {"stdout": content, "exit_code": 0}
             else:
                 return {"error": f"Skill '{skill_name}' not found", "exit_code": 1}
             

@@ -99,6 +99,7 @@ async def chat(request: ChatRequest):
             # --- Цикл обработки (для tool-calling) ---
             max_iterations = 10
             iteration = 0
+            read_skills = set() # Отслеживаем прочитанные скиллы в этой сессии
             
             while iteration < max_iterations:
                 iteration += 1
@@ -157,7 +158,14 @@ async def chat(request: ChatRequest):
 
                         # Выполняем инструмент
                         from tool_executor import ToolExecutor
-                        raw_result = await ToolExecutor.execute(tool_name, tool_data)
+                        
+                        # Если вызван read_skill, запоминаем какой
+                        if tool_name == "read_skill":
+                            skill_name = tool_data.get("name")
+                            if skill_name:
+                                read_skills.add(skill_name)
+
+                        raw_result = await ToolExecutor.execute(tool_name, tool_data, read_skills=read_skills)
                         result = ToolExecutor.wrap_result(raw_result)
                         
                         # Обновляем результат в БД

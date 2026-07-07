@@ -1,6 +1,6 @@
 ## Tool: present
 
-**Description:** Present a file or directory to the user for download. This copies the specified path into the `/home/quadrogent/output` directory, making it available for the user to download via the frontend.
+**Description:** Make a file or directory available for the user to download. 
 
 **Usage:**
 ```json
@@ -11,16 +11,17 @@
 }
 ```
 
+**Important:**
+- If you provide a **directory** path, the system will **automatically pack it into a ZIP archive** before presenting it to the user.
+- The user will see the file in the "Presented Files" section of the UI.
+- Use this when you have finished creating a project, generated a report, or want to share any result files.
+
 **Example:**
 ```json
 {
   "mode": "tool_calling",
   "tool": "present",
-  "path": "/home/quadrogent/output/report.pdf"
+  "path": "/home/quadrogent/my_project"
 }
 ```
-
-**Important:**
-- `path` is the absolute path to the file or directory to be presented.
-- If a directory is presented, it will be copied recursively.
-- The tool will return the full path to the presented item in the `/home/quadrogent/output` directory.
+*(Result: user receives `my_project.zip`)*
