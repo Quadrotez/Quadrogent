@@ -50,47 +50,52 @@ export default function ToolCallBlock({ tool, input, result }) {
         </summary>
 
         <div className="tool-call-body">
-          {hasParams && (
+          <div className="tool-call-grid">
+            {/* Секция Запроса */}
             <div className="tool-call-section">
-              <div className="tool-call-section-label">Параметры:</div>
-              <pre className="tool-call-pre">
-                {JSON.stringify(displayParams, null, 2)}
+              <div className="tool-call-section-label">Запрос:</div>
+              <pre className="tool-call-pre tool-call-input">
+                {hasParams ? JSON.stringify(displayParams, null, 2) : "Нет параметров"}
               </pre>
             </div>
-          )}
 
-          {!isPending && (
-            <>
-              {result.stdout && (
-                <div className="tool-call-section">
-                  <div className="tool-call-section-label">Вывод:</div>
-                  <pre className="tool-call-pre tool-call-stdout">
-                    {result.stdout}
-                  </pre>
+            {/* Секция Результата */}
+            {!isPending && (
+              <div className="tool-call-section">
+                <div className="tool-call-section-label">Результат:</div>
+                <div className="tool-call-result-container">
+                  {result.stdout && (
+                    <pre className="tool-call-pre tool-call-stdout">
+                      {result.stdout}
+                    </pre>
+                  )}
+                  {result.stderr && (
+                    <>
+                      <div className="tool-call-section-label tool-call-section-label--error">
+                        Stderr:
+                      </div>
+                      <pre className="tool-call-pre tool-call-stderr">
+                        {result.stderr}
+                      </pre>
+                    </>
+                  )}
+                  {result.error && (
+                    <>
+                      <div className="tool-call-section-label tool-call-section-label--error">
+                        Ошибка:
+                      </div>
+                      <pre className="tool-call-pre tool-call-stderr">
+                        {result.error}
+                      </pre>
+                    </>
+                  )}
+                  {!result.stdout && !result.stderr && !result.error && (
+                    <div className="tool-call-empty-result">Пустой вывод</div>
+                  )}
                 </div>
-              )}
-              {result.stderr && (
-                <div className="tool-call-section">
-                  <div className="tool-call-section-label tool-call-section-label--error">
-                    Stderr:
-                  </div>
-                  <pre className="tool-call-pre tool-call-stderr">
-                    {result.stderr}
-                  </pre>
-                </div>
-              )}
-              {result.error && (
-                <div className="tool-call-section">
-                  <div className="tool-call-section-label tool-call-section-label--error">
-                    Ошибка:
-                  </div>
-                  <pre className="tool-call-pre tool-call-stderr">
-                    {result.error}
-                  </pre>
-                </div>
-              )}
-            </>
-          )}
+              </div>
+            )}
+          </div>
         </div>
       </details>
     </div>

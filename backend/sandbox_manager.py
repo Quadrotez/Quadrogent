@@ -20,12 +20,12 @@ class SandboxManager:
             pass
 
     @staticmethod
-    def run_command(command: str, timeout: int = 60):
+    def run_command(command: str, timeout: int = 60, user: str = "quadrogent"):
         """Выполняет команду в контейнере."""
         # Убеждаемся, что контейнер запущен
         SandboxManager.ensure_container_running()
         
-        full_cmd = ["docker", "exec", "-u", "quadrogent", CONTAINER_NAME, "bash", "-c", command]
+        full_cmd = ["docker", "exec", "-u", user, CONTAINER_NAME, "bash", "-c", command]
         try:
             result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=timeout)
             return {
@@ -62,19 +62,52 @@ class SandboxManager:
 
     @staticmethod
     def write_file(path: str, content: str):
-        # Используем docker exec для записи файла (простой способ для небольших файлов)
-        # Для надежности лучше использовать временный файл и docker cp
-        temp_file = "/tmp/quadrogent_temp"
-        with open(temp_file, "w") as f:
+        """Запись текстового файла."""
+        # Создаем родительскую директорию если её нет
+        parent_dir = os.path.dirname(path)
+        if parent_dir and parent_dir != "/":
+            SandboxManager.run_command(f"mkdir -p {parent_dir}")
+        
+        temp_file = "/tmp/quadrogent_temp_text"
+        with open(temp_file, "w", encoding="utf-8") as f:
             f.write(content)
         
-        subprocess.run(["docker", "cp", temp_file, f"{CONTAINER_NAME}:{path}"])
-        subprocess.run(["docker", "exec", "-u", "root", CONTAINER_NAME, "chown", "quadrogent:quadrogent", path])
+        result = subprocess.run(["docker", "cp", temp_file, f"{CONTAINER_NAME}:{path}"], capture_output=True)
+        if result.returncode != 0:
+            logger.error(f"Failed to copy file: {result.stderr}")
+        
+        subprocess.run(["docker", "exec", "-u", "root", CONTAINER_NAME, "chown", "quadrogent:quadrogent", path], capture_output=True)
+        os.remove(temp_file)
+
+    @staticmethod
+    def write_file_binary(path: str, content: bytes):
+        """Запись бинарного файла."""
+        # Создаем родительскую директорию если её нет
+        parent_dir = os.path.dirname(path)
+        if parent_dir and parent_dir != "/":
+            SandboxManager.run_command(f"mkdir -p {parent_dir}")
+        
+        temp_file = "/tmp/quadrogent_temp_binary"
+        with open(temp_file, "wb") as f:
+            f.write(content)
+        
+        result = subprocess.run(["docker", "cp", temp_file, f"{CONTAINER_NAME}:{path}"], capture_output=True)
+        if result.returncode != 0:
+            logger.error(f"Failed to copy binary file: {result.stderr}")
+        
+        subprocess.run(["docker", "exec", "-u", "root", CONTAINER_NAME, "chown", "quadrogent:quadrogent", path], capture_output=True)
         os.remove(temp_file)
 
     @staticmethod
     def read_file(path: str):
+        """Чтение текстового файла."""
         result = subprocess.run(["docker", "exec", CONTAINER_NAME, "cat", path], capture_output=True, text=True)
+        return result.stdout
+    
+    @staticmethod
+    def read_file_binary(path: str) -> bytes:
+        """Чтение бинарного файла."""
+        result = subprocess.run(["docker", "exec", CONTAINER_NAME, "cat", path], capture_output=True)
         return result.stdout
 
     @staticmethod

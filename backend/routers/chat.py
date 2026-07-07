@@ -157,7 +157,8 @@ async def chat(request: ChatRequest):
 
                         # Выполняем инструмент
                         from tool_executor import ToolExecutor
-                        result = await ToolExecutor.execute(tool_name, tool_data)
+                        raw_result = await ToolExecutor.execute(tool_name, tool_data)
+                        result = ToolExecutor.wrap_result(raw_result)
                         
                         # Обновляем результат в БД
                         async with async_session() as session:

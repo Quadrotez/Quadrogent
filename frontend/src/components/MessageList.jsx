@@ -13,7 +13,7 @@ import "./MessageList.css";
  * isLoading, status — для индикатора набора текста
  * presentedFiles — файлы для блока "Презентованные файлы"
  */
-export default function MessageList({ messages, isLoading, status, models, presentedFiles }) {
+export default function MessageList({ messages, isLoading, status, models }) {
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -64,8 +64,9 @@ export default function MessageList({ messages, isLoading, status, models, prese
         }
 
         const hasText = !!displayContent;
-        // Скрываем пустой пузырь если нет ни текста, ни tool-calls (кроме последнего загружаемого)
-        if (!hasText && !hasTCs && !(msg.role === "assistant" && isLoading && isLastMsg)) {
+        const hasFiles = msg.presentedFiles && msg.presentedFiles.length > 0;
+        // Скрываем пустой пузырь если нет ни текста, ни tool-calls, ни файлов (кроме последнего загружаемого)
+        if (!hasText && !hasTCs && !hasFiles && !(msg.role === "assistant" && isLoading && isLastMsg)) {
           return null;
         }
 

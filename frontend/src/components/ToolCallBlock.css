@@ -87,15 +87,38 @@ details[open] .tool-call-summary::before {
 .tool-call-body {
   padding: 10px 12px;
   border-top: 1px solid #333;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+}
+
+.tool-call-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .tool-call-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .tool-call-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+}
+
+.tool-call-result-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-call-empty-result {
+  color: #666;
+  font-style: italic;
+  font-size: 0.75rem;
+  padding: 4px;
 }
 
 .tool-call-section-label {

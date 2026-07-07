@@ -11,7 +11,7 @@ class ToolExecutor:
         logger.info(f"Выполнение инструмента: {tool_name} с аргументами {args}")
         
         if tool_name == "bash":
-            return SandboxManager.run_command(args.get("content", ""))
+            return SandboxManager.run_command(args.get("command", ""))
         
         elif tool_name == "create_file":
             path = args.get("path")
@@ -59,7 +59,10 @@ class ToolExecutor:
             venv = args.get("virtualenv")
             
             if pkg_type == "apt":
-                return SandboxManager.run_command(f"sudo apt-get install -y {package}")
+                # Установка пакетов требует прав root. 
+                # Используем полный путь /usr/bin/apt-get чтобы избежать конфликтов с утилитой 'install'
+                cmd = f"DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get update && DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y {package}"
+                return SandboxManager.run_command(cmd, user="root")
             elif pkg_type == "pip":
                 pip_cmd = f"{venv}/bin/pip" if venv else "pip"
                 return SandboxManager.run_command(f"{pip_cmd} install {package}")
@@ -128,4 +131,17 @@ class ToolExecutor:
             else:
                 return {"error": f"Skill '{skill_name}' not found", "exit_code": 1}
             
-        return {"error": f"Unknown tool: {tool_name}", "exit_code": 1}
+        res = {"error": f"Unknown tool: {tool_name}", "exit_code": 1}
+        return res
+
+    @staticmethod
+    def wrap_result(result: dict):
+        """Добавляет системное напоминание к результату инструмента."""
+        reminder = "\n\n--- SYSTEM REMINDER ---\nAlways wrap your tool calls in ```json ... ``` blocks. Ensure the JSON is valid and complete. If you need to perform a new action, call 'read_skill' first if you haven't read that skill in this session."
+        if "stdout" in result:
+            result["stdout"] = str(result["stdout"]) + reminder
+        elif "error" in result:
+            result["error"] = str(result["error"]) + reminder
+        else:
+            result["stdout"] = reminder
+        return result

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sandbox_manager import SandboxManager
 from pydantic import BaseModel
 import os
@@ -38,15 +38,19 @@ async def list_files(path: str = "/home/quadrogent"):
 
 @router.get("/read")
 async def read_file(path: str):
-    """Чтение файла из песочницы."""
-    content = SandboxManager.read_file(path)
-    return {"content": content}
+    """Чтение текстового файла из песочницы."""
+    try:
+        content = SandboxManager.read_file(path)
+        return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/download")
 async def download_file(path: str):
-    """Скачивание файла из песочницы."""
+    """Скачивание файла из песочницы (поддержка бинарных файлов)."""
     try:
-        content = SandboxManager.read_file(path)
+        # Пытаемся прочитать как бинарный файл
+        content = SandboxManager.read_file_binary(path)
         filename = os.path.basename(path)
         return Response(
             content=content,
@@ -84,7 +88,7 @@ async def delete_file(path: str):
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Загрузка файла в папку uploads песочницы."""
+    """Загрузка файла в папку uploads песочницы (поддержка бинарных файлов)."""
     try:
         # Создаем папку uploads если её нет
         SandboxManager.run_command("mkdir -p /home/quadrogent/uploads")
@@ -92,14 +96,11 @@ async def upload_file(file: UploadFile = File(...)):
         # Путь внутри контейнера
         dest_path = f"/home/quadrogent/uploads/{file.filename}"
         
-        # Читаем содержимое файла
+        # Читаем содержимое файла как бинарные данные
         content = await file.read()
         
-        # Записываем в песочницу
-        # SandboxManager.write_file ожидает строку, для бинарных файлов используем docker cp или аналоги
-        # Но для простоты сейчас используем текущий метод записи (текст)
-        # Если нужно поддерживать бинарники, придется расширить SandboxManager
-        SandboxManager.write_file(dest_path, content.decode('utf-8', errors='ignore'))
+        # Записываем в песочницу как бинарный файл
+        SandboxManager.write_file_binary(dest_path, content)
         
         return {"status": "ok", "filename": file.filename, "path": dest_path}
     except Exception as e:

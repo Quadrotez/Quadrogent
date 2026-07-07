@@ -54,7 +54,6 @@ export default function App() {
   const [settingsSavedMsg, setSettingsSavedMsg] = useState("");
 
   const [showSandbox, setShowSandbox] = useState(false);
-  const [presentedFiles, setPresentedFiles] = useState([]);
 
   const abortControllerRef = useRef(null);
   const pollTimerRef = useRef(null);
@@ -152,14 +151,12 @@ export default function App() {
     setMessages([]);
     setInput("");
     setError("");
-    setPresentedFiles([]);
   };
 
   const handleSelectChat = async (chatId) => {
     if (isLoading) return;
     setCurrentChatId(chatId);
     setError("");
-    setPresentedFiles([]);
     try {
       const chatData = await fetchChat(chatId);
 
@@ -178,8 +175,8 @@ export default function App() {
         });
       }
 
-      // Восстанавливаем presented files
-      const files = [];
+      // Привязываем presented files к конкретным сообщениям
+      const presentedFilesByMsgId = {};
       for (const tc of chatData.tool_calls || []) {
         if (tc.tool === "present") {
           let output = tc.output;
@@ -188,13 +185,16 @@ export default function App() {
             const stdout = output.stdout || "";
             const pathMatch = stdout.match(/Презентовано: (.*)/);
             const path = pathMatch ? pathMatch[1].trim() : null;
-            if (path && !files.some((f) => f.path === path)) {
-              files.push({ name: path.split("/").pop(), path });
+            if (path) {
+              if (!presentedFilesByMsgId[tc.message_id]) presentedFilesByMsgId[tc.message_id] = [];
+              const name = path.split("/").pop();
+              if (!presentedFilesByMsgId[tc.message_id].some((f) => f.path === path)) {
+                presentedFilesByMsgId[tc.message_id].push({ name, path });
+              }
             }
           }
         }
       }
-      setPresentedFiles(files);
 
       // Строим список сообщений с прикреплёнными tool-calls.
       // tool-calls прикреплены к assistant-сообщению, которое их вызвало.
@@ -215,6 +215,7 @@ export default function App() {
             role: "assistant",
             content: msg.content,
             toolCallsBefore: pendingTCs,
+            presentedFiles: presentedFilesByMsgId[msg.id] || [],
           });
           // tool-calls этого сообщения будут показаны перед следующим
           pendingTCs = msg.toolCalls;
@@ -409,18 +410,18 @@ export default function App() {
         const { tool, result } = toolResult;
 
         // Извлекаем input из текущего контента последнего assistant-сообщения
-        // (бэкенд стримит JSON вызова инструмента как часть full_response)
-        let toolInput = null;
         setMessages((prev) => {
-          const last = prev[prev.length - 1];
+          const updated = [...prev];
+          const lastIdx = updated.length - 1;
+          const last = updated[lastIdx];
+          
+          let toolInput = null;
           if (last?.role === "assistant" && last.content) {
             let jsonStr = null;
-            // Сначала пытаемся найти JSON в markdown-блоке
             const markdownMatch = last.content.match(/```(?:json)?\n([\s\S]*?)\n```/);
             if (markdownMatch) {
               jsonStr = markdownMatch[1];
             } else {
-              // Если не нашли в markdown-блоке, ищем обычный JSON
               const start = last.content.indexOf("{");
               const end = last.content.lastIndexOf("}");
               if (start !== -1 && end !== -1) {
@@ -439,37 +440,42 @@ export default function App() {
               } catch {}
             }
           }
-          return prev; // только читаем, не меняем
-        });
 
-        const tcEntry = { tool, input: toolInput, result };
+          const tcEntry = { tool, input: toolInput, result };
 
-        // Прикрепляем tool-call к текущему assistant-сообщению и очищаем его контент
-        // (следующий ответ модели будет новым текстом)
-        setMessages((prev) => {
-          const updated = [...prev];
-          const lastIdx = updated.length - 1;
-          const last = updated[lastIdx];
           if (last?.role === "assistant") {
             updated[lastIdx] = {
               ...last,
               toolCallsBefore: [...(last.toolCallsBefore || []), tcEntry],
-              content: "",
+              content: "", // Очищаем текст вызова после выполнения
             };
           }
           return updated;
         });
 
-        // Обрабатываем present
+        // Прикрепляем tool-call к текущему assistant-сообщению и очищаем его контент
+        // (следующий ответ модели будет новым текстом)
+        // Обрабатываем present: привязываем файлы к конкретному сообщению
         if (tool === "present" && result?.exit_code === 0) {
           const stdout = result.stdout || "";
           const pathMatch = stdout.match(/Презентовано: (.*)/);
           const path = pathMatch ? pathMatch[1].trim() : null;
           if (path) {
             const name = path.split("/").pop();
-            setPresentedFiles((prev) => {
-              if (prev.some((f) => f.path === path)) return prev;
-              return [...prev, { name, path }];
+            setMessages((prev) => {
+              const updated = [...prev];
+              const lastIdx = updated.length - 1;
+              const last = updated[lastIdx];
+              if (last?.role === "assistant") {
+                const existingFiles = last.presentedFiles || [];
+                if (!existingFiles.some((f) => f.path === path)) {
+                  updated[lastIdx] = {
+                    ...last,
+                    presentedFiles: [...existingFiles, { name, path }],
+                  };
+                }
+              }
+              return updated;
             });
           }
         }
@@ -523,7 +529,6 @@ export default function App() {
             isLoading={isLoading}
             status={status}
             models={models}
-            presentedFiles={presentedFiles}
           />
 
           {error && <div className="error-banner">{error}</div>}
