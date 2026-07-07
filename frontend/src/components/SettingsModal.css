@@ -1,0 +1,110 @@
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background-color: #242424;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 90%;
+  max-width: 420px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal h2 {
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+.settings-section h3 {
+  font-size: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.settings-hint {
+  font-size: 0.85rem;
+  color: #aaa;
+  margin-bottom: 0.7rem;
+}
+
+.settings-hint--small {
+  font-size: 0.75rem;
+  margin-top: 0.8rem;
+  margin-bottom: 0;
+}
+
+.settings-input {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  background-color: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.settings-input:focus {
+  border-color: #0066cc;
+}
+
+.settings-error {
+  color: #ff8080;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.settings-success {
+  color: #7fd88f;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.settings-close {
+  padding: 0.75rem 1.5rem;
+  background-color: transparent;
+  border: 1px solid #3a3a3a;
+  color: #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.settings-close:hover {
+  background-color: #333;
+}
+
+/* Кнопка "Сохранить" переиспользует .send-button из InputForm */
+.send-button {
+  padding: 0.6rem 1.2rem;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  background-color: #0066cc;
+  transition: background-color 0.2s;
+}
+
+.send-button:hover:not(:disabled) {
+  background-color: #0052a3;
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -170,6 +170,12 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
 export async function fetchSandboxFiles(path) {
   const res = await fetch(`${API_BASE}/sandbox/files?path=${encodeURIComponent(path || "/home/quadrogent")}`);
   if (!res.ok) throw new Error(`Ошибка загрузки файлов: ${res.status}`);
+  return res.json(); // { path, entries: [{name, path, type}] }
+}
+
+export async function deleteSandboxFile(path) {
+  const res = await fetch(`${API_BASE}/sandbox/delete?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Ошибка удаления: ${res.status}`);
   return res.json();
 }
 

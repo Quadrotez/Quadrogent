@@ -20,7 +20,7 @@ class ToolExecutor:
                 return {"error": "Путь обязателен", "exit_code": 1}
             
             if isinstance(content_raw, list):
-                content = "\n".join(content_raw)
+                content = "\n".join([str(line) for line in content_raw])
             else:
                 content = str(content_raw)
                 
@@ -34,7 +34,7 @@ class ToolExecutor:
                 return {"error": "Путь обязателен", "exit_code": 1}
             
             if isinstance(content_raw, list):
-                content = "\n".join(content_raw)
+                content = "\n".join([str(line) for line in content_raw])
             else:
                 content = str(content_raw)
                 
@@ -101,5 +101,31 @@ class ToolExecutor:
             
         elif tool_name == "stop":
             return {"stdout": "Работа завершена", "exit_code": 0, "stop": True}
+            
+        elif tool_name == "read_skill":
+            skill_name = args.get("name")
+            if not skill_name:
+                return {"error": "Skill name is required", "exit_code": 1}
+            
+            # Определяем абсолютный путь к папке prompts относительно текущего файла
+            current_dir = os.path.dirname(os.path.abspath(__file__)) # Это backend/
+            prompts_dir = os.path.join(current_dir, "prompts")
+            
+            skill_path = os.path.join(prompts_dir, f"{skill_name}.md")
+            
+            if not os.path.exists(skill_path):
+                # Пробуем найти без расширения, если вдруг передали с ним
+                if skill_name.endswith(".md"):
+                    skill_path = os.path.join(prompts_dir, skill_name)
+                
+            if os.path.exists(skill_path):
+                try:
+                    with open(skill_path, "r") as f:
+                        content = f.read()
+                    return {"stdout": content, "exit_code": 0}
+                except Exception as e:
+                    return {"error": f"Failed to read skill: {str(e)}", "exit_code": 1}
+            else:
+                return {"error": f"Skill '{skill_name}' not found", "exit_code": 1}
             
         return {"error": f"Unknown tool: {tool_name}", "exit_code": 1}

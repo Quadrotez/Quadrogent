@@ -13,11 +13,28 @@ class FileContent(BaseModel):
 
 @router.get("/files")
 async def list_files(path: str = "/home/quadrogent"):
-    """Список файлов в песочнице."""
-    res = SandboxManager.run_command(f"ls -R -F {path}")
+    """Список файлов и папок в указанной директории (один уровень)."""
+    # -1 — по одному на строку, -p — добавляет / к директориям
+    res = SandboxManager.run_command(f"ls -1 -p {path} 2>&1")
     if res.get("exit_code") != 0:
-        raise HTTPException(status_code=500, detail=res.get("stderr") or res.get("error"))
-    return {"output": res.get("stdout")}
+        raise HTTPException(status_code=500, detail=res.get("stderr") or res.get("error") or "Ошибка листинга")
+
+    stdout = res.get("stdout", "")
+    entries = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line or line in (".", ".."):
+            continue
+        is_dir = line.endswith("/")
+        name = line.rstrip("/")
+        full_path = path.rstrip("/") + "/" + name
+        entries.append({
+            "name": name,
+            "path": full_path,
+            "type": "dir" if is_dir else "file",
+        })
+
+    return {"path": path, "entries": entries}
 
 @router.get("/read")
 async def read_file(path: str):
@@ -35,7 +52,7 @@ async def download_file(path: str):
             content=content,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": f'attachment; filename="{filename}"'
             }
         )
     except Exception as e:

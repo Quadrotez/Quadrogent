@@ -1,0 +1,120 @@
+.input-form {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #3a3a3a;
+  border-radius: 12px;
+  background-color: #2a2a2a;
+  margin: 1rem 0;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.input-form.dragging {
+  border-color: #0066cc;
+  background-color: #1e2a3a;
+}
+
+.attached-files-preview {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.attached-file-chip {
+  background: #333;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #e0e0e0;
+}
+
+.attached-file-remove {
+  background: none;
+  border: none;
+  color: #ff4d4d;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px;
+}
+
+.attach-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  font-size: 1.2rem;
+  padding: 8px;
+  cursor: pointer;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+
+.attach-button:hover {
+  color: #0066cc;
+}
+
+.message-input {
+  flex: 1;
+  padding: 0.75rem 0;
+  background-color: transparent;
+  border: none;
+  color: #e0e0e0;
+  font-size: 1rem;
+  font-family: inherit;
+  outline: none;
+  resize: none;
+  max-height: 200px;
+  overflow-y: auto;
+  line-height: 1.4;
+}
+
+.message-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.send-button,
+.stop-button {
+  padding: 0.6rem 1.2rem;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+
+.send-button {
+  background-color: #0066cc;
+}
+
+.send-button:hover:not(:disabled) {
+  background-color: #0052a3;
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stop-button {
+  background-color: #cc3333;
+}
+
+.stop-button:hover {
+  background-color: #a32929;
+}

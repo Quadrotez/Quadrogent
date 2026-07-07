@@ -1,0 +1,127 @@
+.tool-call-block {
+  border-radius: 8px;
+  border: 1px solid #333;
+  background: #1e1e1e;
+  margin: 6px 0;
+  font-size: 0.875rem;
+  overflow: hidden;
+}
+
+.tool-call-block.success {
+  border-color: #2a4a2a;
+}
+
+.tool-call-block.error {
+  border-color: #4a2a2a;
+}
+
+.tool-call-block.pending {
+  border-color: #3a3a1a;
+}
+
+.tool-call-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  background: #242424;
+}
+
+.tool-call-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call-summary::before {
+  content: "▶";
+  font-size: 0.65rem;
+  color: #666;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+details[open] .tool-call-summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-call-status-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.tool-call-name {
+  flex: 1;
+  color: #ccc;
+}
+
+.tool-call-name strong {
+  color: #e0e0e0;
+}
+
+.tool-call-badge {
+  font-size: 0.75rem;
+  color: #888;
+  background: #333;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.tool-call-block.success .tool-call-badge {
+  color: #4ade80;
+  background: #1a2e1a;
+}
+
+.tool-call-block.error .tool-call-badge {
+  color: #f87171;
+  background: #2e1a1a;
+}
+
+.tool-call-block.pending .tool-call-badge {
+  color: #fbbf24;
+  background: #2e2a1a;
+}
+
+.tool-call-body {
+  padding: 10px 12px;
+  border-top: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-call-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-call-section-label {
+  font-size: 0.72rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tool-call-section-label--error {
+  color: #f87171;
+}
+
+.tool-call-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  color: #ccc;
+  background: #111;
+  border-radius: 4px;
+  padding: 6px 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.tool-call-stderr {
+  color: #fca5a5;
+}
