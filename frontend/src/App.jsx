@@ -52,6 +52,12 @@ export default function App() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [settingsSavedMsg, setSettingsSavedMsg] = useState("");
+  const [modelSettings, setModelSettings] = useState({
+    model_num_ctx: "8192",
+    model_temperature: "0.0",
+    model_top_p: "0.9",
+    model_max_tokens: "4096",
+  });
 
   const [showSandbox, setShowSandbox] = useState(false);
 
@@ -91,27 +97,40 @@ export default function App() {
       .then((data) => {
         const orKey = data?.api_keys?.openrouter?.api_key;
         setOpenrouterConfigured(!!orKey);
+        
+        if (data?.settings) {
+          setModelSettings((prev) => ({
+            ...prev,
+            ...data.settings,
+          }));
+        }
       })
       .catch(() => {});
   }, []);
 
   // --- Настройки ---
-  const handleSaveOpenrouterKey = async () => {
-    if (!openrouterKeyInput.trim()) {
-      setSettingsError("Введите ключ");
-      return;
-    }
+  const handleSaveSettings = async () => {
     setSettingsSaving(true);
     setSettingsError("");
     setSettingsSavedMsg("");
     try {
-      await saveApiKey("openrouter", openrouterKeyInput.trim());
-      setOpenrouterConfigured(true);
-      setOpenrouterKeyInput("");
-      setSettingsSavedMsg("Ключ сохранён");
+      // Сохраняем API ключ если введен
+      if (openrouterKeyInput.trim()) {
+        await saveApiKey("openrouter", openrouterKeyInput.trim());
+        setOpenrouterConfigured(true);
+        setOpenrouterKeyInput("");
+      }
+
+      // Сохраняем параметры модели
+      const { saveSetting } = await import("./api");
+      for (const [key, value] of Object.entries(modelSettings)) {
+        await saveSetting(key, value);
+      }
+
+      setSettingsSavedMsg("Настройки сохранены");
       loadModels();
     } catch (e) {
-      setSettingsError(e.message || "Не удалось сохранить ключ");
+      setSettingsError(e.message || "Не удалось сохранить настройки");
     } finally {
       setSettingsSaving(false);
     }
@@ -515,10 +534,12 @@ export default function App() {
             openrouterConfigured={openrouterConfigured}
             openrouterKeyInput={openrouterKeyInput}
             setOpenrouterKeyInput={setOpenrouterKeyInput}
+            modelSettings={modelSettings}
+            setModelSettings={setModelSettings}
             settingsSaving={settingsSaving}
             settingsError={settingsError}
             settingsSavedMsg={settingsSavedMsg}
-            onSave={handleSaveOpenrouterKey}
+            onSave={handleSaveSettings}
             onClose={() => setShowSettings(false)}
           />
         )}

@@ -14,10 +14,24 @@ from routers import chat, settings, models, chats, sandbox
 async def lifespan(app: FastAPI):
     await init_db()
     async with async_session() as session:
+        # Ollama Base URL
         result = await session.execute(select(Setting).where(Setting.key == "ollama_base_url"))
         if not result.scalar_one_or_none():
             session.add(Setting(key="ollama_base_url", value="http://localhost:11434"))
-            await session.commit()
+        
+        # Model Parameters
+        model_params = {
+            "model_num_ctx": "8192",
+            "model_temperature": "0.0",
+            "model_top_p": "0.9",
+            "model_max_tokens": "4096"
+        }
+        for key, value in model_params.items():
+            res = await session.execute(select(Setting).where(Setting.key == key))
+            if not res.scalar_one_or_none():
+                session.add(Setting(key=key, value=value))
+                
+        await session.commit()
     yield
 
 

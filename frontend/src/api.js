@@ -30,6 +30,16 @@ export async function saveApiKey(provider, apiKey, baseUrl) {
   return res.json();
 }
 
+export async function saveSetting(key, value) {
+  const res = await fetch(`${API_BASE}/settings/setting`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value: String(value) }),
+  });
+  if (!res.ok) throw new Error(`Ошибка сохранения настройки: ${res.status}`);
+  return res.json();
+}
+
 // --- История чатов ---
 export async function fetchChats() {
   const res = await fetch(`${API_BASE}/chats`);

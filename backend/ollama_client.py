@@ -18,6 +18,20 @@ async def get_ollama_url() -> str:
         return setting.value if setting else DEFAULT_OLLAMA_URL
 
 
+async def get_model_settings() -> dict:
+    async with async_session() as session:
+        keys = ["model_num_ctx", "model_temperature", "model_top_p", "model_max_tokens"]
+        result = await session.execute(select(Setting).where(Setting.key.in_(keys)))
+        settings = {s.key: s.value for s in result.scalars().all()}
+        
+        return {
+            "num_ctx": int(settings.get("model_num_ctx", 8192)),
+            "temperature": float(settings.get("model_temperature", 0.0)),
+            "top_p": float(settings.get("model_top_p", 0.9)),
+            "max_tokens": int(settings.get("model_max_tokens", 4096))
+        }
+
+
 async def list_models() -> list[dict]:
     base_url = await get_ollama_url()
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -42,10 +56,17 @@ async def chat_stream(
 ) -> AsyncIterator[str]:
     """Стриминг ответа от Ollama. Возвращает куски текста."""
     base_url = await get_ollama_url()
+    model_settings = await get_model_settings()
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
+        "options": {
+            "num_ctx": model_settings["num_ctx"],
+            "temperature": model_settings["temperature"],
+            "top_p": model_settings["top_p"],
+            "num_predict": model_settings["max_tokens"],
+        }
     }
 
     async with httpx.AsyncClient(timeout=None) as client:

@@ -40,6 +40,20 @@ async def is_configured() -> bool:
     return bool(key)
 
 
+async def get_model_settings() -> dict:
+    async with async_session() as session:
+        keys = ["model_num_ctx", "model_temperature", "model_top_p", "model_max_tokens"]
+        result = await session.execute(select(Setting).where(Setting.key.in_(keys)))
+        settings = {s.key: s.value for s in result.scalars().all()}
+        
+        return {
+            "num_ctx": int(settings.get("model_num_ctx", 8192)),
+            "temperature": float(settings.get("model_temperature", 0.0)),
+            "top_p": float(settings.get("model_top_p", 0.9)),
+            "max_tokens": int(settings.get("model_max_tokens", 4096))
+        }
+
+
 async def list_models() -> list[dict]:
     """Список моделей, доступных через OpenRouter."""
     key = await get_api_key()
@@ -81,10 +95,14 @@ async def chat_stream(model: str, messages: list[dict]) -> AsyncIterator[str]:
         "HTTP-Referer": "http://localhost:5173",
         "X-Title": "Quadrogent",
     }
+    model_settings = await get_model_settings()
     payload = {
         "model": model,
         "messages": messages,
         "stream": True,
+        "temperature": model_settings["temperature"],
+        "top_p": model_settings["top_p"],
+        "max_tokens": model_settings["max_tokens"],
     }
 
     async with httpx.AsyncClient(timeout=None) as client:
