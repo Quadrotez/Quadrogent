@@ -32,3 +32,4 @@ __pycache__/
 
 ## Database
 quadrogent.db
+data/

@@ -1,53 +1,48 @@
-version: '3.8'
-
 services:
   quadrogent-sandbox:
     build:
-      context: ./backend
-      dockerfile: sandbox.Dockerfile
-    container_name: quadrogent-runtime
+      context: ./sandbox
+      dockerfile: Dockerfile
+    container_name: quadrogent-sandbox
+    network_mode: host
     environment:
       - HOME=/home/quadrogent
     volumes:
       - quadrogent-home:/home/quadrogent
-    networks:
-      - quadrogent-network
-    command: tail -f /dev/null
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   quadrogent-backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: quadrogent-backend
-    ports:
-      - "8000:8000"
+    network_mode: host
     environment:
-      - DATABASE_URL=sqlite:///./quadrogent.db
+      - DATABASE_URL=sqlite+aiosqlite:///./data/quadrogent.db
+      - SANDBOX_API_URL=http://localhost:5000
     volumes:
-      - ./backend:/app
-    networks:
-      - quadrogent-network
+      - quadrogent-db:/app/data
     depends_on:
-      - quadrogent-sandbox
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      quadrogent-sandbox:
+        condition: service_healthy
 
   quadrogent-frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: quadrogent-frontend
-    ports:
-      - "5173:5173"
+    network_mode: host
     volumes:
-      - ./frontend:/app
-    networks:
-      - quadrogent-network
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
     depends_on:
       - quadrogent-backend
 
 volumes:
   quadrogent-home:
-
-networks:
-  quadrogent-network:
-    driver: bridge
+  quadrogent-db:

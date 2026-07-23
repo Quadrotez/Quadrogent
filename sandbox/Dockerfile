@@ -1,6 +1,5 @@
 FROM alpine:latest
 
-# Установка необходимых пакетов
 RUN apk add --no-cache \
     bash \
     curl \
@@ -12,24 +11,27 @@ RUN apk add --no-cache \
     unzip \
     sudo
 
-# Создание скрипта-обертки для имитации apt-get (так как в Alpine используется apk)
-# Это позволит модели использовать привычные команды установки
 RUN echo '#!/bin/bash' > /usr/local/bin/apt-get && \
     echo 'if [[ "$1" == "install" ]]; then shift; sudo apk add --no-cache "$@"; else echo "Only install command is wrapped"; fi' >> /usr/local/bin/apt-get && \
     chmod +x /usr/local/bin/apt-get
 
-# Создание пользователя quadrogent
 RUN adduser -D -s /bin/bash quadrogent && \
     echo "quadrogent ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
-# Настройка рабочих директорий
 WORKDIR /home/quadrogent
 RUN mkdir -p /home/quadrogent/uploads /home/quadrogent/output && \
     chown -R quadrogent:quadrogent /home/quadrogent
 
-# Переключение на пользователя quadrogent
+ENV HOME=/home/quadrogent
+
+WORKDIR /app
+COPY requirements.txt .
+RUN python3 -m venv /app/venv && /app/venv/bin/pip install --no-cache-dir -r requirements.txt && chown -R quadrogent:quadrogent /app
+
+COPY sandbox_server.py .
+
 USER quadrogent
 
-# Начальная директория
-ENV HOME=/home/quadrogent
-WORKDIR /home/quadrogent
+EXPOSE 5000
+
+CMD ["/app/venv/bin/python3", "-m", "uvicorn", "sandbox_server:app", "--host", "0.0.0.0", "--port", "5000"]
