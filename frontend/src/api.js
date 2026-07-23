@@ -4,7 +4,7 @@ export async function fetchModels() {
   const res = await fetch(`${API_BASE}/models`);
   if (!res.ok) throw new Error(`Ошибка загрузки моделей: ${res.status}`);
   const data = await res.json();
-  return data.models || [];
+  return { models: data.models || [], errors: data.errors || null };
 }
 
 export async function fetchRunningModels() {
@@ -20,13 +20,34 @@ export async function fetchSettings() {
   return res.json();
 }
 
-export async function saveApiKey(provider, apiKey, baseUrl) {
+export async function fetchProviders() {
+  const res = await fetch(`${API_BASE}/settings/providers`);
+  if (!res.ok) throw new Error(`Ошибка загрузки провайдеров: ${res.status}`);
+  const data = await res.json();
+  return data.providers || [];
+}
+
+export async function saveApiKey(provider, apiKey, baseUrl, proxyUrl, enabled) {
   const res = await fetch(`${API_BASE}/settings/api-key`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, api_key: apiKey, base_url: baseUrl || null }),
+    body: JSON.stringify({
+      provider,
+      api_key: apiKey || null,
+      base_url: baseUrl || null,
+      proxy_url: proxyUrl || null,
+      enabled: enabled !== undefined ? enabled : undefined,
+    }),
   });
   if (!res.ok) throw new Error(`Ошибка сохранения ключа: ${res.status}`);
+  return res.json();
+}
+
+export async function testProvider(name) {
+  const res = await fetch(`${API_BASE}/settings/providers/${name}/test`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Ошибка тестирования: ${res.status}`);
   return res.json();
 }
 
@@ -60,7 +81,7 @@ export async function deleteChat(chatId) {
   return res.json();
 }
 
-export async function streamChat(model, messages, onChunk, onDone, onError, signal, chatId = null, onChatId = null, onToolResult = null) {
+export async function streamChat(model, messages, onChunk, onDone, onError, signal, chatId = null, onChatId = null, onToolResult = null, onTitle = null) {
   try {
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
@@ -109,11 +130,13 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
         let isErrorEvent = false;
         let isChatIdEvent = false;
         let isToolResultEvent = false;
+        let isTitleEvent = false;
 
         for (const line of lines) {
           if (line.trim() === "event: error") isErrorEvent = true;
           if (line.trim() === "event: chat_id") isChatIdEvent = true;
           if (line.trim() === "event: tool_result") isToolResultEvent = true;
+          if (line.trim() === "event: title") isTitleEvent = true;
         }
 
         for (const line of lines) {
@@ -142,6 +165,17 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
                 } catch (e) {
                     console.error("Error parsing tool_result payload:", e);
                 }
+            }
+            continue;
+          }
+
+          if (isTitleEvent) {
+            if (onTitle) {
+              try {
+                onTitle(JSON.parse(payload));
+              } catch (e) {
+                onTitle(payload);
+              }
             }
             continue;
           }

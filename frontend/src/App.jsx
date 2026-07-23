@@ -4,7 +4,7 @@ import {
   fetchRunningModels,
   streamChat,
   fetchSettings,
-  saveApiKey,
+  saveSetting,
   fetchChats,
   fetchChat,
   deleteChat,
@@ -14,6 +14,7 @@ import Header from "./components/Header";
 import MessageList from "./components/MessageList";
 import InputForm from "./components/InputForm";
 import SettingsModal from "./components/SettingsModal";
+import ProviderManager from "./components/ProviderManager";
 import SandboxManager from "./SandboxManager";
 import "./App.css";
 
@@ -48,8 +49,7 @@ export default function App() {
   const [currentChatId, setCurrentChatId] = useState(null);
 
   const [showSettings, setShowSettings] = useState(false);
-  const [openrouterConfigured, setOpenrouterConfigured] = useState(false);
-  const [openrouterKeyInput, setOpenrouterKeyInput] = useState("");
+  const [showProviders, setShowProviders] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [settingsSavedMsg, setSettingsSavedMsg] = useState("");
@@ -58,6 +58,7 @@ export default function App() {
     model_temperature: "0.0",
     model_top_p: "0.9",
     model_max_tokens: "4096",
+    generate_titles: "false",
   });
 
   const [sandboxOpen, setSandboxOpen] = useState(false);
@@ -76,7 +77,7 @@ export default function App() {
   // --- Загрузка моделей ---
   const loadModels = () => {
     fetchModels()
-      .then((list) => {
+      .then(({ models: list, errors }) => {
         setModels(list);
         if (list.length === 0) return;
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -85,6 +86,13 @@ export default function App() {
           setSelectedModel(saved);
         } else if (!list.some((m) => m.name === selectedModel)) {
           setSelectedModel(list[0].name);
+        }
+        // Показываем ошибки провайдеров если есть
+        if (errors && Object.keys(errors).length > 0) {
+          const msgs = Object.entries(errors)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join("; ");
+          setError(`Ошибки загрузки моделей: ${msgs}`);
         }
       })
       .catch((err) => setError(`Не удалось загрузить модели: ${err.message}`));
@@ -104,9 +112,6 @@ export default function App() {
     loadChats();
     fetchSettings()
       .then((data) => {
-        const orKey = data?.api_keys?.openrouter?.api_key;
-        setOpenrouterConfigured(!!orKey);
-        
         if (data?.settings) {
           setModelSettings((prev) => ({
             ...prev,
@@ -123,15 +128,6 @@ export default function App() {
     setSettingsError("");
     setSettingsSavedMsg("");
     try {
-      // Сохраняем API ключ если введен
-      if (openrouterKeyInput.trim()) {
-        await saveApiKey("openrouter", openrouterKeyInput.trim());
-        setOpenrouterConfigured(true);
-        setOpenrouterKeyInput("");
-      }
-
-      // Сохраняем параметры модели
-      const { saveSetting } = await import("./api");
       for (const [key, value] of Object.entries(modelSettings)) {
         await saveSetting(key, value);
       }
@@ -187,7 +183,6 @@ export default function App() {
     try {
       const chatData = await fetchChat(chatId);
 
-      // Строим карту: message_id -> tool_calls[]
       const tcByMsgId = {};
       for (const tc of chatData.tool_calls || []) {
         if (!tcByMsgId[tc.message_id]) tcByMsgId[tc.message_id] = [];
@@ -202,7 +197,6 @@ export default function App() {
         });
       }
 
-      // Привязываем presented files к конкретным сообщениям
       const presentedFilesByMsgId = {};
       for (const tc of chatData.tool_calls || []) {
         if (tc.tool === "present") {
@@ -223,9 +217,6 @@ export default function App() {
         }
       }
 
-      // Строим список сообщений с прикреплёнными tool-calls.
-      // tool-calls прикреплены к assistant-сообщению, которое их вызвало.
-      // Мы показываем их ПЕРЕД следующим ответом ассистента (хронологический порядок).
       const rawMessages = chatData.messages.map((m) => ({
         id: m.id,
         role: m.role,
@@ -244,10 +235,8 @@ export default function App() {
             toolCallsBefore: pendingTCs,
             presentedFiles: presentedFilesByMsgId[msg.id] || [],
           });
-          // tool-calls этого сообщения будут показаны перед следующим
           pendingTCs = msg.toolCalls;
         } else {
-          // Перед user-сообщением: если остались pending tool-calls — добавляем их
           if (pendingTCs.length > 0) {
             builtMessages.push({
               role: "assistant",
@@ -260,7 +249,6 @@ export default function App() {
         }
       }
 
-      // Если остались tool-calls после последнего сообщения
       if (pendingTCs.length > 0) {
         builtMessages.push({
           role: "assistant",
@@ -281,7 +269,6 @@ export default function App() {
     try {
       const chatData = await fetchChat(chatId);
 
-      // Строим карту: message_id -> tool_calls[]
       const tcByMsgId = {};
       for (const tc of chatData.tool_calls || []) {
         if (!tcByMsgId[tc.message_id]) tcByMsgId[tc.message_id] = [];
@@ -297,7 +284,6 @@ export default function App() {
         });
       }
 
-      // Хронологический список сообщений с tool-calls
       const messages = [];
       for (const m of chatData.messages || []) {
         if (m.role === "assistant") {
@@ -391,7 +377,6 @@ export default function App() {
     setMessages(newMessages);
     setInput("");
 
-    // Добавляем пустое сообщение ассистента (будет заполнено чанками)
     setMessages((prev) => [
       ...prev,
       { role: "assistant", content: "", toolCallsBefore: [] },
@@ -400,9 +385,10 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    const isOpenrouterModel = selectedModel.startsWith("openrouter:");
+    // Для облачных провайдеров не нужно polling — они отвечают сразу
+    const isCloudProvider = selectedModel.includes(":");
     let initialStatus = "thinking";
-    if (!isOpenrouterModel) {
+    if (!isCloudProvider) {
       initialStatus = "loading";
       try {
         const running = await fetchRunningModels();
@@ -414,7 +400,6 @@ export default function App() {
 
     let firstChunkReceived = false;
 
-    // Сообщения для API (без UI-полей)
     const apiMessages = newMessages.map(({ role, content }) => ({ role, content }));
 
     await streamChat(
@@ -489,11 +474,10 @@ export default function App() {
       (newChatId) => {
         if (!currentChatId) setCurrentChatId(newChatId);
       },
-      // onToolResult — встраиваем tool-call в поток сообщений в реальном времени
+      // onToolResult
       (toolResult) => {
         const { tool, result } = toolResult;
 
-        // Извлекаем input из текущего контента последнего assistant-сообщения
         setMessages((prev) => {
           const updated = [...prev];
           const lastIdx = updated.length - 1;
@@ -531,15 +515,12 @@ export default function App() {
             updated[lastIdx] = {
               ...last,
               toolCallsBefore: [...(last.toolCallsBefore || []), tcEntry],
-              content: "", // Очищаем текст вызова после выполнения
+              content: "",
             };
           }
           return updated;
         });
 
-        // Прикрепляем tool-call к текущему assistant-сообщению и очищаем его контент
-        // (следующий ответ модели будет новым текстом)
-        // Обрабатываем present: привязываем файлы к конкретному сообщению
         if (tool === "present" && result?.exit_code === 0) {
           const stdout = result.stdout || "";
           const pathMatch = stdout.match(/Презентовано: (.*)/);
@@ -563,6 +544,14 @@ export default function App() {
             });
           }
         }
+      },
+      // onTitle
+      (title) => {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === currentChatId ? { ...c, title } : c
+          )
+        );
       }
     );
   };
@@ -589,6 +578,7 @@ export default function App() {
           selectedModel={selectedModel}
           isLoading={isLoading}
           onModelSelect={handleModelSelect}
+          onOpenProviders={() => setShowProviders(true)}
           sandboxOpen={sandboxOpen}
           sandboxMode={sandboxMode}
           onOpenSandbox={() => setSandboxOpen(true)}
@@ -597,9 +587,6 @@ export default function App() {
 
         {showSettings && (
           <SettingsModal
-            openrouterConfigured={openrouterConfigured}
-            openrouterKeyInput={openrouterKeyInput}
-            setOpenrouterKeyInput={setOpenrouterKeyInput}
             modelSettings={modelSettings}
             setModelSettings={setModelSettings}
             settingsSaving={settingsSaving}
@@ -607,6 +594,15 @@ export default function App() {
             settingsSavedMsg={settingsSavedMsg}
             onSave={handleSaveSettings}
             onClose={() => setShowSettings(false)}
+          />
+        )}
+
+        {showProviders && (
+          <ProviderManager
+            onSaved={() => {
+              loadModels();
+            }}
+            onClose={() => setShowProviders(false)}
           />
         )}
 

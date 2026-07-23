@@ -1,3 +1,5 @@
+"""Unified client for OpenAI-compatible providers (OpenRouter, Groq, etc.)."""
+
 import json
 from typing import AsyncIterator, Optional
 
@@ -5,65 +7,66 @@ import httpx
 from sqlalchemy import select
 
 from database import async_session
-from models import ApiKey
-
-OPENROUTER_BASE_URL_DEFAULT = "https://openrouter.ai/api/v1"
-PROVIDER = "openrouter"
+from models import ApiKey, Setting
+from providers import PROVIDERS
 
 
-class OpenRouterNotConfigured(Exception):
-    """Ключ OpenRouter не задан в настройках."""
+class ProviderNotConfigured(Exception):
+    """API-ключ провайдера не задан в настройках."""
 
 
-async def _get_api_key_record() -> Optional[ApiKey]:
+async def _get_api_key_record(provider: str) -> Optional[ApiKey]:
     async with async_session() as session:
         result = await session.execute(
-            select(ApiKey).where(ApiKey.provider == PROVIDER)
+            select(ApiKey).where(ApiKey.provider == provider)
         )
         return result.scalar_one_or_none()
 
 
-async def get_api_key() -> Optional[str]:
-    record = await _get_api_key_record()
-    return record.api_key if record else None
+async def is_configured(provider: str) -> bool:
+    record = await _get_api_key_record(provider)
+    return bool(record and record.api_key)
 
 
-async def get_base_url() -> str:
-    record = await _get_api_key_record()
+async def get_base_url(provider: str) -> str:
+    record = await _get_api_key_record(provider)
     if record and record.base_url:
         return record.base_url.rstrip("/")
-    return OPENROUTER_BASE_URL_DEFAULT
+    default = PROVIDERS.get(provider, {}).get("default_base_url", "")
+    return default.rstrip("/") if default else ""
 
 
-async def is_configured() -> bool:
-    key = await get_api_key()
-    return bool(key)
+async def get_proxy_url(provider: str) -> Optional[str]:
+    record = await _get_api_key_record(provider)
+    if record and record.proxy_url:
+        return record.proxy_url.strip() or None
+    return None
 
 
 async def get_model_settings() -> dict:
     async with async_session() as session:
-        keys = ["model_num_ctx", "model_temperature", "model_top_p", "model_max_tokens"]
+        keys = ["model_temperature", "model_top_p", "model_max_tokens"]
         result = await session.execute(select(Setting).where(Setting.key.in_(keys)))
         settings = {s.key: s.value for s in result.scalars().all()}
-        
+
         return {
-            "num_ctx": int(settings.get("model_num_ctx", 8192)),
             "temperature": float(settings.get("model_temperature", 0.0)),
             "top_p": float(settings.get("model_top_p", 0.9)),
-            "max_tokens": int(settings.get("model_max_tokens", 4096))
+            "max_tokens": int(settings.get("model_max_tokens", 4096)),
         }
 
 
-async def list_models() -> list[dict]:
-    """Список моделей, доступных через OpenRouter."""
-    key = await get_api_key()
-    if not key:
+async def list_models(provider: str) -> list[dict]:
+    """Список моделей, доступных через OpenAI-совместимый API."""
+    record = await _get_api_key_record(provider)
+    if not record or not record.api_key:
         return []
 
-    base_url = await get_base_url()
-    headers = {"Authorization": f"Bearer {key}"}
+    base_url = await get_base_url(provider)
+    proxy = await get_proxy_url(provider)
+    headers = {"Authorization": f"Bearer {record.api_key}"}
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
         response = await client.get(f"{base_url}/models", headers=headers)
         response.raise_for_status()
         data = response.json()
@@ -79,21 +82,22 @@ async def list_models() -> list[dict]:
         return result
 
 
-async def chat_stream(model: str, messages: list[dict]) -> AsyncIterator[str]:
-    """Стриминг ответа от OpenRouter (OpenAI-совместимый формат SSE)."""
-    key = await get_api_key()
-    if not key:
-        raise OpenRouterNotConfigured(
-            "API-ключ OpenRouter не настроен. Добавьте его в настройках."
+async def chat_stream(
+    provider: str, model: str, messages: list[dict]
+) -> AsyncIterator[str]:
+    """Стриминг ответа от OpenAI-совместимого провайдера (SSE)."""
+    record = await _get_api_key_record(provider)
+    if not record or not record.api_key:
+        raise ProviderNotConfigured(
+            f"API-ключ провайдера '{provider}' не настроен. "
+            "Добавьте его через управление провайдерами."
         )
 
-    base_url = await get_base_url()
+    base_url = await get_base_url(provider)
+    proxy = await get_proxy_url(provider)
     headers = {
-        "Authorization": f"Bearer {key}",
+        "Authorization": f"Bearer {record.api_key}",
         "Content-Type": "application/json",
-        # Рекомендовано OpenRouter для идентификации приложения (необязательно).
-        "HTTP-Referer": "http://localhost:5173",
-        "X-Title": "Quadrogent",
     }
     model_settings = await get_model_settings()
     payload = {
@@ -105,7 +109,7 @@ async def chat_stream(model: str, messages: list[dict]) -> AsyncIterator[str]:
         "max_tokens": model_settings["max_tokens"],
     }
 
-    async with httpx.AsyncClient(timeout=None) as client:
+    async with httpx.AsyncClient(timeout=None, proxy=proxy) as client:
         async with client.stream(
             "POST",
             f"{base_url}/chat/completions",
@@ -115,7 +119,8 @@ async def chat_stream(model: str, messages: list[dict]) -> AsyncIterator[str]:
             if response.status_code >= 400:
                 error_body = await response.aread()
                 raise httpx.HTTPStatusError(
-                    f"OpenRouter вернул ошибку {response.status_code}: {error_body.decode(errors='ignore')}",
+                    f"{provider} вернул ошибку {response.status_code}: "
+                    f"{error_body.decode(errors='ignore')}",
                     request=response.request,
                     response=response,
                 )
@@ -124,7 +129,7 @@ async def chat_stream(model: str, messages: list[dict]) -> AsyncIterator[str]:
                 if not line or not line.startswith("data:"):
                     continue
 
-                data_str = line[len("data:"):].strip()
+                data_str = line[len("data:") :].strip()
                 if data_str == "[DONE]":
                     break
 

@@ -9,8 +9,23 @@ from models import Setting, ApiKey
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 
+async def is_configured() -> bool:
+    """Ollama всегда доступен (локальный сервер)."""
+    return True
+
+
 async def get_ollama_url() -> str:
+    """Читает base_url Ollama: сначала из api_keys, потом из settings (backward compat)."""
     async with async_session() as session:
+        # Приоритет: api_keys таблица (ProviderManager)
+        result = await session.execute(
+            select(ApiKey).where(ApiKey.provider == "ollama")
+        )
+        record = result.scalar_one_or_none()
+        if record and record.base_url:
+            return record.base_url.rstrip("/")
+
+        # Fallback: settings таблица (старый формат)
         result = await session.execute(
             select(Setting).where(Setting.key == "ollama_base_url")
         )

@@ -1,0 +1,266 @@
+.pm-modal {
+  max-width: 480px;
+}
+
+.pm-subtitle {
+  font-size: 0.85rem;
+  color: #aaa;
+  margin-bottom: 1rem;
+}
+
+.pm-loading {
+  padding: 24px;
+  text-align: center;
+  color: #666;
+}
+
+.pm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.pm-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pm-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pm-list::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
+}
+
+.pm-provider {
+  border: 1px solid #333;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.pm-provider--expanded {
+  border-color: #555;
+}
+
+.pm-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  color: #e0e0e0;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.pm-provider-header:hover {
+  background: #2a2a2a;
+}
+
+.pm-provider-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pm-provider-name {
+  font-weight: 500;
+  flex: 1;
+}
+
+.pm-provider-status {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.pm-provider-status--ok {
+  color: #4ade80;
+}
+
+.pm-provider-status--off {
+  color: #ff8080;
+}
+
+.pm-toggle {
+  width: 32px;
+  height: 18px;
+  background: #333;
+  border-radius: 9px;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.pm-toggle--on {
+  background: #4ade80;
+}
+
+.pm-toggle-thumb {
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+}
+
+.pm-toggle--on .pm-toggle-thumb {
+  transform: translateX(14px);
+}
+
+.pm-provider-arrow {
+  font-size: 0.7rem;
+  color: #666;
+}
+
+.pm-provider-body {
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pm-field label {
+  display: block;
+  font-size: 0.78rem;
+  color: #aaa;
+  margin-bottom: 4px;
+}
+
+.pm-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.pm-input:focus {
+  border-color: #0066cc;
+}
+
+.pm-input::placeholder {
+  color: #555;
+}
+
+.pm-hint {
+  display: block;
+  font-size: 0.7rem;
+  color: #555;
+  margin-top: 3px;
+}
+
+.pm-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pm-save-btn {
+  padding: 7px 18px;
+  background: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.pm-save-btn:hover:not(:disabled) {
+  background: #0052a3;
+}
+
+.pm-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pm-test-btn {
+  padding: 7px 14px;
+  background: #333;
+  color: #ccc;
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.pm-test-btn:hover:not(:disabled) {
+  background: #3a3a3a;
+  border-color: #666;
+}
+
+.pm-test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pm-test-result {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 2px;
+}
+
+.pm-test-result--ok {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.pm-test-result--error {
+  color: #ff8080;
+  background: rgba(255, 128, 128, 0.08);
+}
+
+.pm-error {
+  color: #ff8080;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.pm-success {
+  color: #7fd88f;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.pm-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.pm-close-btn {
+  padding: 7px 18px;
+  background: transparent;
+  border: 1px solid #3a3a3a;
+  color: #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.2s;
+}
+
+.pm-close-btn:hover {
+  background: #333;
+}

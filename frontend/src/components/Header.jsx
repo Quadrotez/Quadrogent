@@ -1,7 +1,7 @@
 import ModelSelector from "./ModelSelector";
 import "./Header.css";
 
-export default function Header({ models, selectedModel, isLoading, onModelSelect, sandboxOpen, sandboxMode, onOpenSandbox, onOpenSettings }) {
+export default function Header({ models, selectedModel, isLoading, onModelSelect, onOpenProviders, sandboxOpen, sandboxMode, onOpenSandbox, onOpenSettings }) {
   return (
     <header className="header">
       <h1>Quadrogent</h1>
@@ -11,6 +11,7 @@ export default function Header({ models, selectedModel, isLoading, onModelSelect
           selectedModel={selectedModel}
           isLoading={isLoading}
           onSelect={onModelSelect}
+          onOpenProviders={onOpenProviders}
         />
         {!sandboxOpen && (
           <button

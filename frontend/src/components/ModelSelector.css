@@ -129,16 +129,6 @@
   flex-shrink: 0;
 }
 
-.ms-section-dot--ollama {
-  background: #4ade80;
-  box-shadow: 0 0 6px rgba(74, 222, 128, 0.4);
-}
-
-.ms-section-dot--openrouter {
-  background: #a78bfa;
-  box-shadow: 0 0 6px rgba(167, 139, 250, 0.4);
-}
-
 .ms-section-count {
   margin-left: auto;
   font-weight: 400;
@@ -193,4 +183,30 @@
   text-align: center;
   color: #666;
   font-size: 0.85rem;
+}
+
+/* --- Footer with providers button --- */
+.ms-footer {
+  padding: 8px 12px;
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.ms-providers-btn {
+  width: 100%;
+  padding: 8px 12px;
+  background: #252525;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  color: #aaa;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.ms-providers-btn:hover {
+  background: #2a2a2a;
+  color: #e0e0e0;
+  border-color: #555;
 }

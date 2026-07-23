@@ -14,13 +14,15 @@ class Setting(Base):
 
 
 class ApiKey(Base):
-    """API-ключи для разных провайдеров (OpenAI, Anthropic и т.д.)"""
+    """API-ключи для разных провайдеров (Ollama, OpenRouter, Groq и т.д.)"""
     __tablename__ = "api_keys"
 
     id = Column(Integer, primary_key=True)
     provider = Column(String, unique=True, nullable=False, index=True)
     api_key = Column(String, nullable=True)
     base_url = Column(String, nullable=True)
+    proxy_url = Column(String, nullable=True)
+    enabled = Column(Integer, nullable=False, default=1)  # 1=вкл, 0=выкл
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -1,14 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import "./ModelSelector.css";
 
-export default function ModelSelector({ models, selectedModel, isLoading, onSelect }) {
+export default function ModelSelector({ models, selectedModel, isLoading, onSelect, onOpenProviders }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const panelRef = useRef(null);
   const searchRef = useRef(null);
 
-  const ollamaModels = models.filter((m) => m.provider === "ollama");
-  const openrouterModels = models.filter((m) => m.provider === "openrouter");
+  // Группируем модели по провайдеру динамически
+  const grouped = {};
+  for (const m of models) {
+    const provider = m.provider || "unknown";
+    if (!grouped[provider]) grouped[provider] = [];
+    grouped[provider].push(m);
+  }
 
   const filter = (list) => {
     if (!search.trim()) return list;
@@ -21,8 +26,13 @@ export default function ModelSelector({ models, selectedModel, isLoading, onSele
     );
   };
 
-  const filteredOllama = filter(ollamaModels);
-  const filteredOpenrouter = filter(openrouterModels);
+  const filteredGrouped = {};
+  for (const [provider, list] of Object.entries(grouped)) {
+    const filtered = filter(list);
+    if (filtered.length > 0) {
+      filteredGrouped[provider] = filtered;
+    }
+  }
 
   const selectedDisplay = models.find((m) => m.name === selectedModel);
   const buttonText = selectedDisplay
@@ -57,6 +67,18 @@ export default function ModelSelector({ models, selectedModel, isLoading, onSele
     onSelect(name);
     setOpen(false);
     setSearch("");
+  };
+
+  const PROVIDER_COLORS = {
+    ollama: "#4ade80",
+    openrouter: "#a78bfa",
+    groq: "#f97316",
+  };
+
+  const PROVIDER_LABELS = {
+    ollama: "Ollama",
+    openrouter: "OpenRouter",
+    groq: "Groq",
   };
 
   const renderModel = (m) => (
@@ -98,31 +120,38 @@ export default function ModelSelector({ models, selectedModel, isLoading, onSele
           </div>
 
           <div className="ms-list">
-            {filteredOllama.length > 0 && (
-              <div className="ms-section">
-                <div className="ms-section-header ms-section-header--ollama">
-                  <span className="ms-section-dot ms-section-dot--ollama" />
-                  Ollama
-                  <span className="ms-section-count">{filteredOllama.length}</span>
+            {Object.entries(filteredGrouped).map(([provider, list]) => (
+              <div className="ms-section" key={provider}>
+                <div className="ms-section-header">
+                  <span
+                    className="ms-section-dot"
+                    style={{
+                      background: PROVIDER_COLORS[provider] || "#888",
+                      boxShadow: `0 0 6px ${PROVIDER_COLORS[provider] || "#888"}66`,
+                    }}
+                  />
+                  {PROVIDER_LABELS[provider] || provider}
+                  <span className="ms-section-count">{list.length}</span>
                 </div>
-                {filteredOllama.map(renderModel)}
+                {list.map(renderModel)}
               </div>
-            )}
+            ))}
 
-            {filteredOpenrouter.length > 0 && (
-              <div className="ms-section">
-                <div className="ms-section-header ms-section-header--openrouter">
-                  <span className="ms-section-dot ms-section-dot--openrouter" />
-                  OpenRouter
-                  <span className="ms-section-count">{filteredOpenrouter.length}</span>
-                </div>
-                {filteredOpenrouter.map(renderModel)}
-              </div>
-            )}
-
-            {filteredOllama.length === 0 && filteredOpenrouter.length === 0 && (
+            {Object.keys(filteredGrouped).length === 0 && (
               <div className="ms-empty">Ничего не найдено</div>
             )}
+          </div>
+
+          <div className="ms-footer">
+            <button
+              className="ms-providers-btn"
+              onClick={() => {
+                setOpen(false);
+                if (onOpenProviders) onOpenProviders();
+              }}
+            >
+              Управление провайдерами
+            </button>
           </div>
         </div>
       )}

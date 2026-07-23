@@ -1,18 +1,32 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
-from database import init_db, async_session
+from database import init_db, async_session, engine
 from models import Setting
 from sqlalchemy import select
+from providers import PROVIDERS
 
 # Добавляем chats в импорт
-from routers import chat, settings, models, chats, sandbox 
+from routers import chat, settings, models, chats, sandbox
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+
+    # Миграция: добавляем proxy_url и enabled в api_keys если нет
+    async with engine.begin() as conn:
+        try:
+            await conn.execute(text("ALTER TABLE api_keys ADD COLUMN proxy_url VARCHAR"))
+        except Exception:
+            pass
+        try:
+            await conn.execute(text("ALTER TABLE api_keys ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"))
+        except Exception:
+            pass
+
     async with async_session() as session:
         # Ollama Base URL
         result = await session.execute(select(Setting).where(Setting.key == "ollama_base_url"))
@@ -30,6 +44,11 @@ async def lifespan(app: FastAPI):
             res = await session.execute(select(Setting).where(Setting.key == key))
             if not res.scalar_one_or_none():
                 session.add(Setting(key=key, value=value))
+
+        # Генерация заголовков (выключена по умолчанию)
+        res = await session.execute(select(Setting).where(Setting.key == "generate_titles"))
+        if not res.scalar_one_or_none():
+            session.add(Setting(key="generate_titles", value="false"))
                 
         await session.commit()
     yield
