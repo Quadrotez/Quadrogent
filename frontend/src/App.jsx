@@ -18,6 +18,7 @@ import SandboxManager from "./SandboxManager";
 import "./App.css";
 
 const STORAGE_KEY = "quadrogent_selected_model";
+const SANDBOX_MODE_KEY = "quadrogent_sandbox_mode";
 
 /**
  * Структура элемента массива messages:
@@ -59,7 +60,15 @@ export default function App() {
     model_max_tokens: "4096",
   });
 
-  const [showSandbox, setShowSandbox] = useState(false);
+  const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [sandboxMode, setSandboxMode] = useState(
+    () => localStorage.getItem(SANDBOX_MODE_KEY) || "panel"
+  );
+
+  const changeSandboxMode = (mode) => {
+    setSandboxMode(mode);
+    localStorage.setItem(SANDBOX_MODE_KEY, mode);
+  };
 
   const abortControllerRef = useRef(null);
   const pollTimerRef = useRef(null);
@@ -136,10 +145,9 @@ export default function App() {
     }
   };
 
-  const handleModelChange = (e) => {
-    const newModel = e.target.value;
-    setSelectedModel(newModel);
-    localStorage.setItem(STORAGE_KEY, newModel);
+  const handleModelSelect = (modelName) => {
+    setSelectedModel(modelName);
+    localStorage.setItem(STORAGE_KEY, modelName);
   };
 
   // --- Polling статуса модели ---
@@ -265,6 +273,63 @@ export default function App() {
     } catch (e) {
       console.error(e);
       setError("Не удалось загрузить чат");
+    }
+  };
+
+  const handleExportChat = async (chatId, e) => {
+    e.stopPropagation();
+    try {
+      const chatData = await fetchChat(chatId);
+
+      // Строим карту: message_id -> tool_calls[]
+      const tcByMsgId = {};
+      for (const tc of chatData.tool_calls || []) {
+        if (!tcByMsgId[tc.message_id]) tcByMsgId[tc.message_id] = [];
+        let parsedInput = tc.input;
+        try { parsedInput = JSON.parse(tc.input); } catch {}
+        let parsedOutput = tc.output;
+        try { parsedOutput = JSON.parse(tc.output); } catch {}
+        tcByMsgId[tc.message_id].push({
+          tool: tc.tool,
+          input: parsedInput,
+          result: parsedOutput,
+          status: tc.status,
+        });
+      }
+
+      // Хронологический список сообщений с tool-calls
+      const messages = [];
+      for (const m of chatData.messages || []) {
+        if (m.role === "assistant") {
+          messages.push({
+            role: m.role,
+            content: m.content,
+            toolCalls: tcByMsgId[m.id] || [],
+          });
+        } else {
+          messages.push({ role: m.role, content: m.content });
+        }
+      }
+
+      const exportData = {
+        chat_id: chatData.id,
+        title: chatData.title,
+        exported_at: new Date().toISOString(),
+        messages,
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeTitle = (chatData.title || "chat").replace(/[^a-zA-Zа-яА-Я0-9_\-]/g, "_").slice(0, 50);
+      a.download = `${safeTitle}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError("Не удалось экспортировать чат: " + err.message);
     }
   };
 
@@ -515,6 +580,7 @@ export default function App() {
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
         onDeleteChat={handleDeleteChat}
+        onExportChat={handleExportChat}
       />
 
       <div className="main-content">
@@ -522,12 +588,12 @@ export default function App() {
           models={models}
           selectedModel={selectedModel}
           isLoading={isLoading}
-          onModelChange={handleModelChange}
-          onOpenSandbox={() => setShowSandbox(true)}
+          onModelSelect={handleModelSelect}
+          sandboxOpen={sandboxOpen}
+          sandboxMode={sandboxMode}
+          onOpenSandbox={() => setSandboxOpen(true)}
           onOpenSettings={() => setShowSettings(true)}
         />
-
-        {showSandbox && <SandboxManager onClose={() => setShowSandbox(false)} />}
 
         {showSettings && (
           <SettingsModal
@@ -544,7 +610,7 @@ export default function App() {
           />
         )}
 
-        <main className="chat-container">
+        <main className={`chat-container ${sandboxOpen && sandboxMode === "panel" ? "chat-container--with-panel" : ""}`}>
           <MessageList
             messages={messages}
             isLoading={isLoading}
@@ -568,6 +634,22 @@ export default function App() {
           />
         </main>
       </div>
+
+      {sandboxOpen && sandboxMode === "panel" && (
+        <SandboxManager
+          mode="panel"
+          onClose={() => setSandboxOpen(false)}
+          onToggleMode={() => changeSandboxMode("modal")}
+        />
+      )}
+
+      {sandboxOpen && sandboxMode === "modal" && (
+        <SandboxManager
+          mode="modal"
+          onClose={() => setSandboxOpen(false)}
+          onToggleMode={() => changeSandboxMode("panel")}
+        />
+      )}
     </div>
   );
 }

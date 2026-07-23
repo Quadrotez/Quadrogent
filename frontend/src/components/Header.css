@@ -20,38 +20,6 @@
   gap: 0.75rem;
 }
 
-.model-selector {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.model-selector label {
-  font-size: 0.9rem;
-  color: #aaa;
-}
-
-.model-selector select {
-  padding: 0.5rem 0.75rem;
-  background-color: #1a1a1a;
-  border: 1px solid #3a3a3a;
-  border-radius: 6px;
-  color: #e0e0e0;
-  font-size: 0.9rem;
-  cursor: pointer;
-  outline: none;
-  min-width: 200px;
-}
-
-.model-selector select:focus {
-  border-color: #0066cc;
-}
-
-.model-selector select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .header-icon-btn {
   width: 2.25rem;
   height: 2.25rem;
@@ -70,4 +38,15 @@
 .header-icon-btn:hover {
   background-color: #333;
   border-color: #0066cc;
+}
+
+.header-icon-btn--active {
+  background-color: #0066cc;
+  border-color: #0066cc;
+  color: white;
+}
+
+.header-icon-btn--active:hover {
+  background-color: #0052a3;
+  border-color: #0052a3;
 }

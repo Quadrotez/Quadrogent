@@ -1,6 +1,6 @@
 import "./Sidebar.css";
 
-export default function Sidebar({ chats, currentChatId, isLoading, onNewChat, onSelectChat, onDeleteChat }) {
+export default function Sidebar({ chats, currentChatId, isLoading, onNewChat, onSelectChat, onDeleteChat, onExportChat }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -20,6 +20,13 @@ export default function Sidebar({ chats, currentChatId, isLoading, onNewChat, on
             onClick={() => onSelectChat(chat.id)}
           >
             <span className="chat-item-title">{chat.title}</span>
+            <button
+              className="chat-item-export"
+              onClick={(e) => onExportChat(chat.id, e)}
+              title="Экспорт в JSON"
+            >
+              💾
+            </button>
             <button
               className="chat-item-delete"
               onClick={(e) => onDeleteChat(chat.id, e)}

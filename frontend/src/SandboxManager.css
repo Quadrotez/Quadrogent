@@ -98,6 +98,28 @@
   font-size: 1rem;
 }
 
+.sandbox-mode-toggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid #3a3a3a;
+  background: #2a2a2a;
+  color: #aaa;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.sandbox-mode-toggle:hover {
+  background: #333;
+  border-color: #0066cc;
+  color: #e0e0e0;
+}
+
 .sandbox-btn--up {
   width: 32px;
   height: 32px;
@@ -320,4 +342,27 @@
 .sandbox-editor-actions {
   display: flex;
   gap: 8px;
+}
+
+/* --- Panel mode (right sidebar) --- */
+.sandbox-panel {
+  width: 360px;
+  min-width: 360px;
+  background: #1e1e1e;
+  border-left: 1px solid #3a3a3a;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sandbox-panel .sandbox-header {
+  flex-shrink: 0;
+}
+
+.sandbox-panel .sandbox-browser,
+.sandbox-panel .sandbox-editor {
+  flex: 1;
+  min-height: 0;
 }

@@ -33,6 +33,10 @@
   min-height: 0;
 }
 
+.chat-container--with-panel {
+  max-width: 100%;
+}
+
 /* Баннер ошибки */
 .error-banner {
   padding: 0.5rem 1rem;

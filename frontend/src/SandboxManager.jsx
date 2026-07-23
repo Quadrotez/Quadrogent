@@ -5,7 +5,7 @@ import "./SandboxManager.css";
 const API_BASE = "http://localhost:8000";
 const ROOT_PATH = "/home/quadrogent";
 
-export default function SandboxManager({ onClose }) {
+export default function SandboxManager({ onClose, mode = "modal", onToggleMode }) {
   const [currentPath, setCurrentPath] = useState(ROOT_PATH);
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -112,6 +112,138 @@ export default function SandboxManager({ onClose }) {
 
   const crumbs = buildBreadcrumbs();
 
+  const isPanel = mode === "panel";
+
+  const content = editingFile ? (
+    /* Редактор файла */
+    <div className="sandbox-editor">
+      <div className="sandbox-editor-path">{editingFile}</div>
+      <textarea
+        className="sandbox-editor-textarea"
+        value={editContent}
+        onChange={(e) => setEditContent(e.target.value)}
+        spellCheck={false}
+      />
+      <div className="sandbox-editor-actions">
+        <button
+          className="sandbox-btn sandbox-btn--primary"
+          onClick={handleSaveFile}
+          disabled={editSaving}
+        >
+          {editSaving ? "Сохранение…" : "Сохранить"}
+        </button>
+        <button className="sandbox-btn" onClick={() => setEditingFile(null)}>
+          Отмена
+        </button>
+      </div>
+    </div>
+  ) : (
+    /* Файловый браузер */
+    <div className="sandbox-browser">
+      {/* Хлебные крошки + кнопка назад */}
+      <div className="sandbox-nav">
+        <button
+          className="sandbox-btn sandbox-btn--up"
+          onClick={navigateUp}
+          disabled={currentPath === ROOT_PATH}
+          title="На уровень выше"
+        >
+          ⬆
+        </button>
+        <div className="sandbox-breadcrumbs">
+          {crumbs.map((crumb, i) => (
+            <span key={crumb.path} className="sandbox-breadcrumb">
+              {i > 0 && <span className="sandbox-breadcrumb-sep">/</span>}
+              <button
+                className={`sandbox-breadcrumb-btn ${i === crumbs.length - 1 ? "active" : ""}`}
+                onClick={() => navigateTo(crumb.path)}
+                disabled={i === crumbs.length - 1}
+              >
+                {crumb.label}
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Ошибка */}
+      {error && <div className="sandbox-error">{error}</div>}
+
+      {/* Список файлов */}
+      <div className="sandbox-file-list">
+        {loading ? (
+          <div className="sandbox-status">Загрузка…</div>
+        ) : entries.length === 0 ? (
+          <div className="sandbox-status sandbox-status--empty">Папка пуста</div>
+        ) : (
+          entries.map((entry) => (
+            <div key={entry.path} className="sandbox-entry">
+              <button
+                className="sandbox-entry-name"
+                onClick={() =>
+                  entry.type === "dir"
+                    ? navigateTo(entry.path)
+                    : handleOpenFile(entry.path)
+                }
+                title={entry.path}
+              >
+                <span className="sandbox-entry-icon">
+                  {entry.type === "dir" ? "📁" : "📄"}
+                </span>
+                <span className="sandbox-entry-label">{entry.name}</span>
+              </button>
+
+              <div className="sandbox-entry-actions">
+                {entry.type === "file" && (
+                  <button
+                    className="sandbox-action-btn"
+                    onClick={() => handleDownload(entry)}
+                    title="Скачать"
+                  >
+                    ⬇
+                  </button>
+                )}
+                <button
+                  className="sandbox-action-btn sandbox-action-btn--delete"
+                  onClick={() => handleDelete(entry)}
+                  title="Удалить"
+                >
+                  🗑
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  if (isPanel) {
+    return (
+      <div className="sandbox-panel">
+        <div className="sandbox-header">
+          <h3 className="sandbox-title">📁 Файлы</h3>
+          <div className="sandbox-header-actions">
+            <button className="sandbox-btn sandbox-btn--danger" onClick={handleClear}>
+              Очистить
+            </button>
+            <button
+              className="sandbox-mode-toggle"
+              onClick={onToggleMode}
+              title="Открыть как модальное окно"
+            >
+              ⛶
+            </button>
+            <button className="sandbox-btn sandbox-btn--close" onClick={onClose} title="Закрыть панель">
+              ✕
+            </button>
+          </div>
+        </div>
+        {content}
+      </div>
+    );
+  }
+
   return (
     <div className="sandbox-overlay" onClick={onClose}>
       <div className="sandbox-modal" onClick={(e) => e.stopPropagation()}>
@@ -122,115 +254,19 @@ export default function SandboxManager({ onClose }) {
             <button className="sandbox-btn sandbox-btn--danger" onClick={handleClear}>
               Очистить всё
             </button>
+            <button
+              className="sandbox-mode-toggle"
+              onClick={onToggleMode}
+              title="Закрепить как панель справа"
+            >
+              ▤
+            </button>
             <button className="sandbox-btn sandbox-btn--close" onClick={onClose} title="Закрыть">
               ✕
             </button>
           </div>
         </div>
-
-        {editingFile ? (
-          /* Редактор файла */
-          <div className="sandbox-editor">
-            <div className="sandbox-editor-path">{editingFile}</div>
-            <textarea
-              className="sandbox-editor-textarea"
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              spellCheck={false}
-            />
-            <div className="sandbox-editor-actions">
-              <button
-                className="sandbox-btn sandbox-btn--primary"
-                onClick={handleSaveFile}
-                disabled={editSaving}
-              >
-                {editSaving ? "Сохранение…" : "Сохранить"}
-              </button>
-              <button className="sandbox-btn" onClick={() => setEditingFile(null)}>
-                Отмена
-              </button>
-            </div>
-          </div>
-        ) : (
-          /* Файловый браузер */
-          <div className="sandbox-browser">
-            {/* Хлебные крошки + кнопка назад */}
-            <div className="sandbox-nav">
-              <button
-                className="sandbox-btn sandbox-btn--up"
-                onClick={navigateUp}
-                disabled={currentPath === ROOT_PATH}
-                title="На уровень выше"
-              >
-                ⬆
-              </button>
-              <div className="sandbox-breadcrumbs">
-                {crumbs.map((crumb, i) => (
-                  <span key={crumb.path} className="sandbox-breadcrumb">
-                    {i > 0 && <span className="sandbox-breadcrumb-sep">/</span>}
-                    <button
-                      className={`sandbox-breadcrumb-btn ${i === crumbs.length - 1 ? "active" : ""}`}
-                      onClick={() => navigateTo(crumb.path)}
-                      disabled={i === crumbs.length - 1}
-                    >
-                      {crumb.label}
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Ошибка */}
-            {error && <div className="sandbox-error">{error}</div>}
-
-            {/* Список файлов */}
-            <div className="sandbox-file-list">
-              {loading ? (
-                <div className="sandbox-status">Загрузка…</div>
-              ) : entries.length === 0 ? (
-                <div className="sandbox-status sandbox-status--empty">Папка пуста</div>
-              ) : (
-                entries.map((entry) => (
-                  <div key={entry.path} className="sandbox-entry">
-                    <button
-                      className="sandbox-entry-name"
-                      onClick={() =>
-                        entry.type === "dir"
-                          ? navigateTo(entry.path)
-                          : handleOpenFile(entry.path)
-                      }
-                      title={entry.path}
-                    >
-                      <span className="sandbox-entry-icon">
-                        {entry.type === "dir" ? "📁" : "📄"}
-                      </span>
-                      <span className="sandbox-entry-label">{entry.name}</span>
-                    </button>
-
-                    <div className="sandbox-entry-actions">
-                      {entry.type === "file" && (
-                        <button
-                          className="sandbox-action-btn"
-                          onClick={() => handleDownload(entry)}
-                          title="Скачать"
-                        >
-                          ⬇
-                        </button>
-                      )}
-                      <button
-                        className="sandbox-action-btn sandbox-action-btn--delete"
-                        onClick={() => handleDelete(entry)}
-                        title="Удалить"
-                      >
-                        🗑
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
+        {content}
       </div>
     </div>
   );
