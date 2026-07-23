@@ -38,6 +38,8 @@ You MUST call `read_skill` to unlock the documentation for these before use:
 - **install**: For installing software (apk/pip).
 - **present**: For giving files to the user.
 - **zip / unzip**: For working with archives.
+- **web_search**: For searching the web via DuckDuckGo.
+- **web_fetch**: For fetching the content of a web page by URL.
 - **stop**: Call this ONLY when the task is 100% finished.
 
 # THE FIRST STEP:

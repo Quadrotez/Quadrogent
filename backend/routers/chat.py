@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -11,6 +12,7 @@ from typing import Optional
 
 from ollama_client import chat_stream as ollama_chat_stream, get_ollama_url
 import openai_client
+from openai_client import ProviderRateLimitError
 from providers import get_provider_type
 from database import async_session
 from models import Chat, Message, Setting, ToolCall, ApiKey
@@ -191,19 +193,58 @@ async def chat(request: ChatRequest):
             max_iterations = 10
             iteration = 0
             read_skills = set()
+            tools_were_called = False
             
             while iteration < max_iterations:
                 iteration += 1
-                full_response = ""
-                
-                if provider_type == "ollama":
-                    stream = ollama_chat_stream(real_model, messages_to_send)
-                else:
-                    stream = openai_client.chat_stream(provider_name, real_model, messages_to_send)
 
-                async for chunk in stream:
-                    full_response += chunk
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                max_retries = 5
+                base_delay = 1
+
+                for retry_attempt in range(max_retries):
+                    full_response = ""
+                    delay = base_delay * (2 ** retry_attempt)
+
+                    try:
+                        if provider_type == "ollama":
+                            stream = ollama_chat_stream(real_model, messages_to_send)
+                        else:
+                            stream = openai_client.chat_stream(provider_name, real_model, messages_to_send)
+
+                        async for chunk in stream:
+                            full_response += chunk
+                            yield f"data: {json.dumps(chunk)}\n\n"
+
+                    except ProviderRateLimitError as e:
+                        if retry_attempt >= max_retries - 1:
+                            raise
+                        wait = max(e.retry_after, delay)
+                        logger.warning(f"Rate limit {provider_name}: {e.message}, повтор через {wait:.0f}с")
+                        yield f"data: {json.dumps({'type': 'retry_note', 'content': f'Превышен лимит запросов {provider_name}. Повтор через {wait:.0f}с...'})}\n\n"
+                        await asyncio.sleep(wait)
+                        continue
+
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code != 429 or retry_attempt >= max_retries - 1:
+                            raise
+                        logger.warning(f"HTTP 429 {provider_name}, повтор через {delay}с")
+                        yield f"data: {json.dumps({'type': 'retry_note', 'content': f'Превышен лимит запросов. Повтор через {delay}с...'})}\n\n"
+                        await asyncio.sleep(delay)
+                        continue
+
+                    if full_response.strip():
+                        break
+
+                    if retry_attempt < max_retries - 1:
+                        logger.warning(f"Пустой ответ модели, повтор через {delay}с")
+                        yield f"data: {json.dumps({'type': 'retry_note', 'content': f'Модель не вернула ответ. Повтор через {delay}с...'})}\n\n"
+                        await asyncio.sleep(delay)
+
+                if not full_response.strip():
+                    logger.error(f"Модель не вернула ответ после {max_retries} попыток")
+                    yield f"data: {json.dumps({'type': 'error', 'content': 'Модель не вернула ответ. Попробуйте позже.'})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
 
                 # Пытаемся распарсить JSON ответ для проверки на tool_calling
                 try:
@@ -260,12 +301,20 @@ async def chat(request: ChatRequest):
                             await session.commit()
 
                         yield f"event: tool_result\ndata: {json.dumps({'tool': tool_name, 'result': result})}\n\n"
+
+                        if tool_name != "stop":
+                            tools_were_called = True
                         
                         if tool_name == "stop" or result.get("stop"):
                             break
                         
                         messages_to_send.append({"role": "assistant", "content": full_response})
                         messages_to_send.append({"role": "user", "content": f"Результат выполнения инструмента {tool_name}:\n{json.dumps(result)}"})
+                        continue
+
+                    if tools_were_called:
+                        messages_to_send.append({"role": "assistant", "content": full_response})
+                        messages_to_send.append({"role": "user", "content": "Ты начал использовать инструменты, поэтому ты не можешь просто завершить ответ в chat-режиме. Если задача решена — вызови инструмент stop. Если нет — продолжи с другим инструментом."})
                         continue
 
                     async with async_session() as session:
@@ -279,6 +328,11 @@ async def chat(request: ChatRequest):
 
                 except Exception as e:
                     logger.warning(f"Ошибка парсинга tool_calling: {e}")
+                    if tools_were_called:
+                        messages_to_send.append({"role": "assistant", "content": full_response})
+                        messages_to_send.append({"role": "user", "content": "Твой ответ не удалось распарсить как JSON. Если задача решена — вызови инструмент stop. Если нет — вызови нужный инструмент."})
+                        continue
+
                     async with async_session() as session:
                         session.add(Message(
                             chat_id=chat_id,
@@ -290,12 +344,12 @@ async def chat(request: ChatRequest):
 
             yield "data: [DONE]\n\n"
 
+        except ProviderRateLimitError as e:
+            logger.error(f"Rate limit {provider_name} (исчерпаны попытки): {e.message}")
+            yield f"event: error\ndata: {json.dumps({'type': 'rate_limit', 'message': e.message, 'retry_after': e.retry_after})}\n\n"
         except openai_client.httpx.HTTPStatusError as e:
-            logger.error(f"HTTP Error {e.response.status_code}: {e.response.text}")
-            if e.response.status_code == 429:
-                yield f"event: error\ndata: {e.response.text}\n\n"
-            else:
-                yield f"event: error\ndata: {str(e)}\n\n"
+            logger.error(f"HTTP Error {e.response.status_code} от {provider_name}: {e}")
+            yield f"event: error\ndata: {str(e)}\n\n"
         except openai_client.ProviderNotConfigured as e:
             logger.error(f"Провайдер не настроен: {e}")
             yield f"event: error\ndata: {str(e)}\n\n"

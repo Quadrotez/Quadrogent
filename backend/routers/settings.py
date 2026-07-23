@@ -53,13 +53,14 @@ async def get_providers(db: AsyncSession = Depends(get_db)):
     result = []
     for name, info in PROVIDERS.items():
         record = configured.get(name)
+        needs_api_key = info.get("needs_api_key", True)
         result.append({
             "name": name,
             "display_name": info["display_name"],
             "type": info["type"],
             "color": info["color"],
             "default_base_url": info["default_base_url"],
-            "configured": bool(record and record.api_key),
+            "configured": True if not needs_api_key else bool(record and record.api_key),
             "enabled": bool(record.enabled if record else 1),
             "base_url": record.base_url if record else None,
             "proxy_url": record.proxy_url if record else None,

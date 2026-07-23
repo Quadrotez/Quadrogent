@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import os
+import httpx
 from sandbox_manager import SandboxManager
 
 logger = logging.getLogger("quadrogent.tools")
@@ -18,7 +20,9 @@ class ToolExecutor:
         "zip": {"required": ["path", "output_path"], "optional": ["mode", "tool"]},
         "unzip": {"required": ["path", "output_path"], "optional": ["mode", "tool"]},
         "stop": {"required": [], "optional": ["mode", "tool"]},
-        "read_skill": {"required": ["name"], "optional": ["mode", "tool"]}
+        "read_skill": {"required": ["name"], "optional": ["mode", "tool"]},
+        "web_search": {"required": ["query"], "optional": ["max_results", "mode", "tool"]},
+        "web_fetch": {"required": ["url"], "optional": ["mode", "tool"]}
     }
 
     @staticmethod
@@ -164,7 +168,43 @@ class ToolExecutor:
                 return {"stdout": content, "exit_code": 0}
             else:
                 return {"error": f"Skill '{skill_name}' not found", "exit_code": 1}
-            
+
+        elif tool_name == "web_search":
+            query = args.get("query", "")
+            max_results = int(args.get("max_results", 5))
+
+            from duckduckgo_search import DDGS
+            loop = asyncio.get_event_loop()
+            raw_results = await loop.run_in_executor(
+                None, lambda: list(DDGS().text(query, max_results=max_results))
+            )
+
+            formatted = []
+            for r in raw_results:
+                formatted.append({
+                    "title": r.get("title", ""),
+                    "href": r.get("href", ""),
+                    "body": r.get("body", ""),
+                })
+
+            return {
+                "stdout": json.dumps(formatted, ensure_ascii=False, indent=2),
+                "exit_code": 0,
+            }
+
+        elif tool_name == "web_fetch":
+            url = args.get("url", "")
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "")
+                if "text" in content_type or "json" in content_type or "xml" in content_type or "html" in content_type:
+                    content = resp.text
+                else:
+                    content = f"[{content_type}] Content is binary, length: {len(resp.content)} bytes"
+
+            return {"stdout": content, "exit_code": 0}
+
         res = {"error": f"Unknown tool: {tool_name}", "exit_code": 1}
         return res
 

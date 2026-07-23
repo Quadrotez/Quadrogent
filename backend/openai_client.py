@@ -1,6 +1,7 @@
 """Unified client for OpenAI-compatible providers (OpenRouter, Groq, etc.)."""
 
 import json
+import time
 from typing import AsyncIterator, Optional
 
 import httpx
@@ -13,6 +14,48 @@ from providers import PROVIDERS
 
 class ProviderNotConfigured(Exception):
     """API-ключ провайдера не задан в настройках."""
+
+
+class ProviderRateLimitError(Exception):
+    """Превышен лимит запросов провайдера."""
+
+    def __init__(self, provider: str, retry_after: float, message: str, raw_body: str = None):
+        self.provider = provider
+        self.retry_after = retry_after
+        self.message = message
+        self.raw_body = raw_body
+        super().__init__(f"[{provider}] {message}")
+
+
+def parse_retry_after(error_body: str, provider: str) -> ProviderRateLimitError | None:
+    """Парсит ответ 429 и возвращает ProviderRateLimitError или None."""
+    try:
+        data = json.loads(error_body)
+
+        # OpenRouter: {"error": {"message": "...", "code": 429, "metadata": {"headers": {"X-RateLimit-Reset": "..."}}}}
+        error_info = data.get("error") or {}
+        message = error_info.get("message", "Rate limit exceeded")
+        metadata = error_info.get("metadata") or {}
+        headers = metadata.get("headers") or {}
+
+        retry_after = 5.0  # fallback
+
+        # X-RateLimit-Reset (epoch ms) — OpenRouter
+        reset_ms = headers.get("X-RateLimit-Reset")
+        if reset_ms:
+            try:
+                retry_after = max(int(reset_ms) / 1000 - time.time(), 1.0)
+            except (ValueError, TypeError):
+                pass
+
+        return ProviderRateLimitError(
+            provider=provider,
+            retry_after=retry_after,
+            message=message,
+            raw_body=error_body,
+        )
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return None
 
 
 async def _get_api_key_record(provider: str) -> Optional[ApiKey]:
@@ -118,9 +161,15 @@ async def chat_stream(
         ) as response:
             if response.status_code >= 400:
                 error_body = await response.aread()
+                error_str = error_body.decode(errors="ignore")
+
+                if response.status_code == 429:
+                    exc = parse_retry_after(error_str, provider)
+                    if exc is not None:
+                        raise exc
+
                 raise httpx.HTTPStatusError(
-                    f"{provider} вернул ошибку {response.status_code}: "
-                    f"{error_body.decode(errors='ignore')}",
+                    f"{provider} вернул ошибку {response.status_code}: {error_str}",
                     request=response.request,
                     response=response,
                 )
