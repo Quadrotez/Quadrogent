@@ -65,8 +65,9 @@ export default function MessageList({ messages, isLoading, status, models }) {
 
         const hasText = !!displayContent;
         const hasFiles = msg.presentedFiles && msg.presentedFiles.length > 0;
-        // Скрываем пустой пузырь если нет ни текста, ни tool-calls, ни файлов (кроме последнего загружаемого)
-        if (!hasText && !hasTCs && !hasFiles && !(msg.role === "assistant" && isLoading && isLastMsg)) {
+        const isLastAndStillGenerating = msg.role === "assistant" && isLoading && isLastMsg;
+        const hasRawContent = msg.role === "assistant" && !!msg.content;
+        if (!hasText && !hasTCs && !hasFiles && !isLastAndStillGenerating && !hasRawContent) {
           return null;
         }
 

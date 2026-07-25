@@ -49,6 +49,12 @@ async def lifespan(app: FastAPI):
         res = await session.execute(select(Setting).where(Setting.key == "generate_titles"))
         if not res.scalar_one_or_none():
             session.add(Setting(key="generate_titles", value="false"))
+
+        # Профиль пользователя
+        for key, value in [("user_name", ""), ("user_info", ""), ("system_prompt", "")]:
+            res = await session.execute(select(Setting).where(Setting.key == key))
+            if not res.scalar_one_or_none():
+                session.add(Setting(key=key, value=value))
                 
         await session.commit()
     yield

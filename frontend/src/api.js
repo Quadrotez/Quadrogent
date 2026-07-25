@@ -188,7 +188,19 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
 
           let text;
           try {
-            text = JSON.parse(payload);
+            const parsed = JSON.parse(payload);
+            if (parsed && typeof parsed === "object") {
+              if (parsed.type === "retry_note") {
+                text = parsed.content || "";
+              } else if (parsed.type === "error") {
+                onError(parsed.content || "Неизвестная ошибка");
+                return;
+              } else {
+                text = JSON.stringify(parsed);
+              }
+            } else {
+              text = parsed;
+            }
           } catch {
             text = payload;
           }

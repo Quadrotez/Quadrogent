@@ -1,7 +1,7 @@
 import ModelSelector from "./ModelSelector";
 import "./Header.css";
 
-export default function Header({ models, selectedModel, isLoading, onModelSelect, onOpenProviders, sandboxOpen, sandboxMode, onOpenSandbox, onOpenSettings }) {
+export default function Header({ models, selectedModel, isLoading, onModelSelect, onOpenProviders, sandboxOpen, sandboxMode, onOpenSandbox }) {
   return (
     <header className="header">
       <h1>Quadrogent</h1>
@@ -33,14 +33,6 @@ export default function Header({ models, selectedModel, isLoading, onModelSelect
             📁
           </button>
         )}
-        <button
-          type="button"
-          className="header-icon-btn"
-          onClick={onOpenSettings}
-          title="Настройки"
-        >
-          ⚙
-        </button>
       </div>
     </header>
   );

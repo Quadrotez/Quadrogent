@@ -13,7 +13,7 @@ import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import MessageList from "./components/MessageList";
 import InputForm from "./components/InputForm";
-import SettingsModal from "./components/SettingsModal";
+import ProfilePanel from "./components/ProfilePanel";
 import ProviderManager from "./components/ProviderManager";
 import SandboxManager from "./SandboxManager";
 import "./App.css";
@@ -48,11 +48,14 @@ export default function App() {
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
 
-  const [showSettings, setShowSettings] = useState(false);
   const [showProviders, setShowProviders] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [settingsSavedMsg, setSettingsSavedMsg] = useState("");
+  const [userName, setUserName] = useState("");
+  const [userInfo, setUserInfo] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [modelSettings, setModelSettings] = useState({
     model_num_ctx: "8192",
     model_temperature: "0.0",
@@ -113,29 +116,36 @@ export default function App() {
     fetchSettings()
       .then((data) => {
         if (data?.settings) {
+          const { user_name, user_info, system_prompt, ...llmSettings } = data.settings;
           setModelSettings((prev) => ({
             ...prev,
-            ...data.settings,
+            ...llmSettings,
           }));
+          if (user_name !== undefined) setUserName(user_name || "");
+          if (user_info !== undefined) setUserInfo(user_info || "");
+          if (system_prompt !== undefined) setSystemPrompt(system_prompt || "");
         }
       })
       .catch(() => {});
   }, []);
 
   // --- Настройки ---
-  const handleSaveSettings = async () => {
+  const handleSaveProfile = async () => {
     setSettingsSaving(true);
     setSettingsError("");
     setSettingsSavedMsg("");
     try {
+      await saveSetting("user_name", userName);
+      await saveSetting("user_info", userInfo);
+      await saveSetting("system_prompt", systemPrompt);
+      const PROFILE_KEYS = new Set(["user_name", "user_info", "system_prompt"]);
       for (const [key, value] of Object.entries(modelSettings)) {
+        if (PROFILE_KEYS.has(key)) continue;
         await saveSetting(key, value);
       }
-
-      setSettingsSavedMsg("Настройки сохранены");
-      loadModels();
+      setSettingsSavedMsg("Профиль сохранён");
     } catch (e) {
-      setSettingsError(e.message || "Не удалось сохранить настройки");
+      setSettingsError(e.message || "Не удалось сохранить профиль");
     } finally {
       setSettingsSaving(false);
     }
@@ -430,6 +440,42 @@ export default function App() {
         setIsLoading(false);
         setStatus("idle");
         abortControllerRef.current = null;
+
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant" && last.content && (!last.toolCallsBefore || last.toolCallsBefore.length === 0)) {
+            let jsonStr = null;
+            const markdownMatch = last.content.match(/```(?:json)?\n([\s\S]*?)\n```/);
+            if (markdownMatch) {
+              jsonStr = markdownMatch[1];
+            } else {
+              const start = last.content.indexOf("{");
+              const end = last.content.lastIndexOf("}");
+              if (start !== -1 && end !== -1) {
+                jsonStr = last.content.slice(start, end + 1);
+              }
+            }
+            if (jsonStr) {
+              try {
+                const parsed = JSON.parse(jsonStr);
+                if (parsed.mode === "tool_calling") {
+                  const toolInput = Object.fromEntries(
+                    Object.entries(parsed).filter(([k]) => k !== "mode" && k !== "tool")
+                  );
+                  const updated = [...prev];
+                  updated[prev.length - 1] = {
+                    ...last,
+                    toolCallsBefore: [{ tool: parsed.tool, input: toolInput, result: null }],
+                    content: "",
+                  };
+                  return updated;
+                }
+              } catch {}
+            }
+          }
+          return prev;
+        });
+
         loadChats();
       },
       // onError
@@ -566,10 +612,12 @@ export default function App() {
         chats={chats}
         currentChatId={currentChatId}
         isLoading={isLoading}
+        userName={userName}
         onNewChat={handleNewChat}
         onSelectChat={handleSelectChat}
         onDeleteChat={handleDeleteChat}
         onExportChat={handleExportChat}
+        onOpenProfile={() => setShowProfile(true)}
       />
 
       <div className="main-content">
@@ -582,18 +630,23 @@ export default function App() {
           sandboxOpen={sandboxOpen}
           sandboxMode={sandboxMode}
           onOpenSandbox={() => setSandboxOpen(true)}
-          onOpenSettings={() => setShowSettings(true)}
         />
 
-        {showSettings && (
-          <SettingsModal
+        {showProfile && (
+          <ProfilePanel
+            userName={userName}
+            setUserName={setUserName}
+            userInfo={userInfo}
+            setUserInfo={setUserInfo}
+            systemPrompt={systemPrompt}
+            setSystemPrompt={setSystemPrompt}
             modelSettings={modelSettings}
             setModelSettings={setModelSettings}
-            settingsSaving={settingsSaving}
-            settingsError={settingsError}
-            settingsSavedMsg={settingsSavedMsg}
-            onSave={handleSaveSettings}
-            onClose={() => setShowSettings(false)}
+            saving={settingsSaving}
+            error={settingsError}
+            savedMsg={settingsSavedMsg}
+            onSave={handleSaveProfile}
+            onClose={() => setShowProfile(false)}
           />
         )}
 

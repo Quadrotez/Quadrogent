@@ -1,6 +1,6 @@
 import "./Sidebar.css";
 
-export default function Sidebar({ chats, currentChatId, isLoading, onNewChat, onSelectChat, onDeleteChat, onExportChat }) {
+export default function Sidebar({ chats, currentChatId, isLoading, userName, onNewChat, onSelectChat, onDeleteChat, onExportChat, onOpenProfile }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -36,6 +36,12 @@ export default function Sidebar({ chats, currentChatId, isLoading, onNewChat, on
             </button>
           </div>
         ))}
+      </div>
+      <div className="sidebar-footer">
+        <button className="sidebar-profile-btn" onClick={onOpenProfile} title="Профиль">
+          <span className="sidebar-profile-icon">👤</span>
+          <span className="sidebar-profile-name">{userName || "Профиль"}</span>
+        </button>
       </div>
     </aside>
   );

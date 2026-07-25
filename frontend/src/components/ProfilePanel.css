@@ -1,0 +1,42 @@
+.profile-modal {
+  max-width: 520px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.2rem;
+  border-bottom: 1px solid #3a3a3a;
+  padding-bottom: 0.5rem;
+}
+
+.profile-modal .settings-content {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-textarea {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  background-color: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  color: #e0e0e0;
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.settings-textarea:focus {
+  border-color: #0066cc;
+}
+
+.settings-textarea--tall {
+  min-height: 200px;
+}

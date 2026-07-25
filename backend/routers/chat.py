@@ -13,7 +13,7 @@ from typing import Optional
 from ollama_client import chat_stream as ollama_chat_stream, get_ollama_url
 import openai_client
 from openai_client import ProviderRateLimitError
-from providers import get_provider_type
+from providers import PROVIDERS, get_provider_type
 from database import async_session
 from models import Chat, Message, Setting, ToolCall, ApiKey
 from sandbox_manager import SandboxManager
@@ -38,7 +38,7 @@ def _parse_provider_from_model(model_name: str) -> tuple[str, str]:
     """Извлекает имя провайдера и реальное имя модели по префиксу 'provider:model'."""
     if ":" in model_name:
         provider, real_model = model_name.split(":", 1)
-        if provider:
+        if provider and provider in PROVIDERS:
             return provider, real_model
     return "ollama", model_name
 
@@ -124,19 +124,37 @@ async def chat(request: ChatRequest):
         chat_id = request.chat_id
         full_response = ""
 
-        # --- Загрузка базового системного промпта ---
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_dir = os.path.dirname(current_dir)
-        prompts_dir = os.path.join(backend_dir, "prompts")
-        
-        system_prompt_path = os.path.join(prompts_dir, "system_prompt.md")
+        # --- Загрузка системного промпта ---
         system_prompt = ""
-        if os.path.exists(system_prompt_path):
-            with open(system_prompt_path, "r", encoding="utf-8") as f:
-                system_prompt = f.read()
-        else:
-            logger.error(f"System prompt not found at {system_prompt_path}")
-        
+        async with async_session() as session:
+            res = await session.execute(select(Setting).where(Setting.key == "system_prompt"))
+            custom_prompt = res.scalar_one_or_none()
+            if custom_prompt and custom_prompt.value and custom_prompt.value.strip():
+                system_prompt = custom_prompt.value
+            else:
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                backend_dir = os.path.dirname(current_dir)
+                prompts_dir = os.path.join(backend_dir, "prompts")
+                system_prompt_path = os.path.join(prompts_dir, "system_prompt.md")
+                if os.path.exists(system_prompt_path):
+                    with open(system_prompt_path, "r", encoding="utf-8") as f:
+                        system_prompt = f.read()
+                else:
+                    logger.error(f"System prompt not found at {system_prompt_path}")
+
+            # Добавляем информацию о пользователе
+            user_parts = []
+            res_name = await session.execute(select(Setting).where(Setting.key == "user_name"))
+            user_name_row = res_name.scalar_one_or_none()
+            if user_name_row and user_name_row.value and user_name_row.value.strip():
+                user_parts.append(f"Имя пользователя: {user_name_row.value.strip()}")
+            res_info = await session.execute(select(Setting).where(Setting.key == "user_info"))
+            user_info_row = res_info.scalar_one_or_none()
+            if user_info_row and user_info_row.value and user_info_row.value.strip():
+                user_parts.append(f"Информация о пользователе: {user_info_row.value.strip()}")
+            if user_parts:
+                system_prompt += "\n\n# USER INFO:\n" + "\n".join(user_parts)
+
         messages_to_send = [m for m in messages if m["role"] != "system"]
         messages_to_send.insert(0, {"role": "system", "content": system_prompt})
 
@@ -232,6 +250,14 @@ async def chat(request: ChatRequest):
                         await asyncio.sleep(delay)
                         continue
 
+                    except httpx.ConnectError as e:
+                        if retry_attempt >= max_retries - 1:
+                            raise
+                        logger.warning(f"Ошибка подключения {provider_name}: {e}, повтор через {delay}с")
+                        yield f"data: {json.dumps({'type': 'retry_note', 'content': f'Ошибка подключения к {provider_name}. Повтор через {delay}с...'})}\n\n"
+                        await asyncio.sleep(delay)
+                        continue
+
                     if full_response.strip():
                         break
 
@@ -242,8 +268,7 @@ async def chat(request: ChatRequest):
 
                 if not full_response.strip():
                     logger.error(f"Модель не вернула ответ после {max_retries} попыток")
-                    yield f"data: {json.dumps({'type': 'error', 'content': 'Модель не вернула ответ. Попробуйте позже.'})}\n\n"
-                    yield "data: [DONE]\n\n"
+                    yield f"event: error\ndata: Модель не вернула ответ. Попробуйте позже.\n\n"
                     return
 
                 # Пытаемся распарсить JSON ответ для проверки на tool_calling
@@ -356,6 +381,26 @@ async def chat(request: ChatRequest):
         except Exception as e:
             logger.exception(f"Ошибка в чате #{chat_id}: {e}")
             yield f"event: error\ndata: {str(e)}\n\n"
+        finally:
+            if full_response.strip() and chat_id:
+                try:
+                    async with async_session() as session:
+                        exists = await session.execute(
+                            select(Message).where(
+                                Message.chat_id == chat_id,
+                                Message.role == "assistant",
+                                Message.content == full_response,
+                            )
+                        )
+                        if not exists.scalar_one_or_none():
+                            session.add(Message(
+                                chat_id=chat_id,
+                                role="assistant",
+                                content=full_response,
+                            ))
+                            await session.commit()
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),
