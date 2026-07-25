@@ -1,13 +1,52 @@
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
+import { parseThinkTags } from "../utils/thinkTag";
 import "katex/dist/katex.min.css";
 import "highlight.js/styles/github-dark.css";
+import "./MarkdownMessage.css";
+
+function ThinkingBlock({ content, complete }) {
+  return (
+    <details className="thinking-block">
+      <summary className="thinking-summary">
+        <span className="thinking-icon">
+          {complete ? "💭" : "⏳"}
+        </span>
+        {complete ? "В раздумье…" : "Думаю…"}
+      </summary>
+      <div className="thinking-content">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeHighlight, rehypeKatex]}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+    </details>
+  );
+}
+
+function MarkdownBlock({ content }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeHighlight, rehypeKatex]}
+      components={{
+        a: ({ node: _node, ...props }) => (
+          <a {...props} target="_blank" rel="noopener noreferrer" />
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
 
 export default function MarkdownMessage({ content }) {
-  // Ищем все JSON объекты в тексте сообщения
   let finalContent = content;
 
   // Если контент содержит JSON в markdown-блоке, извлекаем его
@@ -19,18 +58,16 @@ export default function MarkdownMessage({ content }) {
         const chatText = Array.isArray(parsed.content)
           ? parsed.content.join("\n")
           : parsed.content || "";
-        // Заменяем весь markdown-блок на извлеченный текст чата
         finalContent = content.replace(markdownJsonMatch[0], chatText);
       } else if (parsed.mode === "tool_calling") {
-        // Если это tool_calling, удаляем весь markdown-блок
         finalContent = content.replace(markdownJsonMatch[0], "");
       }
-    } catch (e) {
+    } catch {
       // Если невалидный JSON, оставляем как есть
     }
   }
 
-  // Также обрабатываем старый формат, где JSON мог быть без markdown-блока
+  // Обработка старого формата JSON без markdown-блока
   const jsonRegex = /\{[\s\S]*?\}/g;
   let chatContentFromOldFormat = "";
   finalContent = finalContent.replace(jsonRegex, (match) => {
@@ -42,25 +79,39 @@ export default function MarkdownMessage({ content }) {
           : parsed.content || "";
         chatContentFromOldFormat += c + "\n";
       }
-      return ""; // Вырезаем все JSON из основного текста
-    } catch (e) {
-      return match; // Если не JSON, оставляем как есть
+      return "";
+    } catch {
+      return match;
     }
   }).trim();
 
   finalContent = (finalContent + "\n" + chatContentFromOldFormat).trim();
 
+  // Парсим think-теги
+  const { segments, hasThinking } = useMemo(
+    () => parseThinkTags(finalContent),
+    [finalContent]
+  );
+
+  if (!hasThinking) {
+    return <MarkdownBlock content={finalContent} />;
+  }
+
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeHighlight, rehypeKatex]}
-      components={{
-        a: ({ node, ...props }) => (
-          <a {...props} target="_blank" rel="noopener noreferrer" />
-        ),
-      }}
-    >
-      {finalContent}
-    </ReactMarkdown>
+    <div className="markdown-with-thinking">
+      {segments.map((seg, i) => {
+        if (seg.type === "thinking") {
+          return (
+            <ThinkingBlock
+              key={`think-${i}`}
+              content={seg.content}
+              complete={seg.complete}
+            />
+          );
+        }
+        if (!seg.content.trim()) return null;
+        return <MarkdownBlock key={`text-${i}`} content={seg.content} />;
+      })}
+    </div>
   );
 }

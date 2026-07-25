@@ -1,0 +1,75 @@
+.markdown-with-thinking {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+/* Thinking block — сворачиваемый блок с мыслями модели */
+.thinking-block {
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
+.thinking-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-size: 0.85rem;
+  color: #999;
+  background: #242424;
+}
+
+.thinking-summary::-webkit-details-marker {
+  display: none;
+}
+
+.thinking-summary::before {
+  content: "▶";
+  font-size: 0.6rem;
+  color: #666;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+details[open].thinking-block > .thinking-summary::before {
+  transform: rotate(90deg);
+}
+
+.thinking-icon {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.thinking-content {
+  padding: 10px 12px;
+  border-top: 1px solid #333;
+  font-size: 0.85rem;
+  color: #aaa;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.thinking-content p {
+  margin: 0 0 0.5em;
+}
+
+.thinking-content p:last-child {
+  margin-bottom: 0;
+}
+
+.thinking-content code {
+  font-size: 0.8em;
+}
+
+.thinking-content pre {
+  background: #111;
+  border-radius: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+}
