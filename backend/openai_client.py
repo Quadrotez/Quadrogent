@@ -67,6 +67,8 @@ async def _get_api_key_record(provider: str) -> Optional[ApiKey]:
 
 
 async def is_configured(provider: str) -> bool:
+    if provider == "opencode":
+        return True
     record = await _get_api_key_record(provider)
     return bool(record and record.api_key)
 
@@ -102,12 +104,15 @@ async def get_model_settings() -> dict:
 async def list_models(provider: str) -> list[dict]:
     """Список моделей, доступных через OpenAI-совместимый API."""
     record = await _get_api_key_record(provider)
-    if not record or not record.api_key:
+    api_key = record.api_key if record and record.api_key else None
+    if not api_key and provider == "opencode":
+        api_key = "public"
+    if not api_key:
         return []
 
     base_url = await get_base_url(provider)
     proxy = await get_proxy_url(provider)
-    headers = {"Authorization": f"Bearer {record.api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}"}
 
     async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
         response = await client.get(f"{base_url}/models", headers=headers)
@@ -130,7 +135,10 @@ async def chat_stream(
 ) -> AsyncIterator[str]:
     """Стриминг ответа от OpenAI-совместимого провайдера (SSE)."""
     record = await _get_api_key_record(provider)
-    if not record or not record.api_key:
+    api_key = record.api_key if record and record.api_key else None
+    if not api_key and provider == "opencode":
+        api_key = "public"
+    if not api_key:
         raise ProviderNotConfigured(
             f"API-ключ провайдера '{provider}' не настроен. "
             "Добавьте его через управление провайдерами."
@@ -139,7 +147,7 @@ async def chat_stream(
     base_url = await get_base_url(provider)
     proxy = await get_proxy_url(provider)
     headers = {
-        "Authorization": f"Bearer {record.api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     model_settings = await get_model_settings()

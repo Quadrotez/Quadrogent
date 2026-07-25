@@ -22,6 +22,13 @@ PROVIDERS = {
         "color": "#f97316",
         "needs_api_key": True,
     },
+    "opencode": {
+        "display_name": "OpenCode Zen",
+        "default_base_url": "https://opencode.ai/zen/v1",
+        "type": "openai",
+        "color": "#656363",
+        "needs_api_key": False,
+    },
 }
 
 

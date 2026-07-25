@@ -23,6 +23,57 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger("quadrogent.chat")
 
 
+def _summarize_tool_action(tool_name: str, tool_data: dict, result: dict) -> str:
+    """Генерирует краткую человекочитаемую сводку по выполненному действию."""
+    success = result.get("exit_code") == 0
+    status = "" if success else " [ОШИБКА]"
+
+    if tool_name == "create_file":
+        return f"Создан файл: {tool_data.get('path', '?')}{status}"
+    elif tool_name == "patch_file":
+        return f"Изменён файл: {tool_data.get('path', '?')}{status}"
+    elif tool_name == "remove":
+        return f"Удалён: {tool_data.get('path', '?')}{status}"
+    elif tool_name == "makedir":
+        return f"Создана папка: {tool_data.get('path', '?')}{status}"
+    elif tool_name == "install":
+        pkg = tool_data.get("package", "?")
+        pkg_type = tool_data.get("type", "?")
+        return f"Установлен пакет ({pkg_type}): {pkg}{status}"
+    elif tool_name == "present":
+        stdout = result.get("stdout", "")
+        path_match = re.search(r"Презентовано: (.+)", stdout)
+        presented = path_match.group(1).strip() if path_match else tool_data.get("path", "?")
+        return f"Презентован пользователю: {presented}{status}"
+    elif tool_name == "zip":
+        return f"Создан архив: {tool_data.get('output_path', '?')}{status}"
+    elif tool_name == "unzip":
+        return f"Распакован архив: {tool_data.get('path', '?')} → {tool_data.get('output_path', '?')}{status}"
+    elif tool_name == "bash":
+        cmd = tool_data.get("command", "?")
+        short_cmd = cmd if len(cmd) <= 80 else cmd[:77] + "..."
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        output_preview = ""
+        if stdout:
+            lines = stdout.strip().split("\n")
+            if len(lines) > 3:
+                output_preview = f" (вывод: {len(lines)} строк)"
+            elif stdout.strip():
+                output_preview = f" (вывод: {stdout.strip()[:100]})"
+        elif stderr:
+            output_preview = f" (ошибка: {stderr.strip()[:100]})"
+        return f"Команда: {short_cmd}{output_preview}{status}"
+    elif tool_name == "read_skill":
+        return None  # не логируем чтение скиллов — шум
+    elif tool_name == "web_search":
+        return f"Поиск в интернете: {tool_data.get('query', '?')}{status}"
+    elif tool_name == "web_fetch":
+        return f"Загружен контент: {tool_data.get('url', '?')}{status}"
+    else:
+        return f"Инструмент {tool_name}{status}"
+
+
 class ChatMessage(BaseModel):
     role: str  # "user", "assistant", "system"
     content: str
@@ -212,9 +263,24 @@ async def chat(request: ChatRequest):
             iteration = 0
             read_skills = set()
             tools_were_called = False
+            actions_log = []
             
             while iteration < max_iterations:
                 iteration += 1
+
+                # Добавляем сводку выполненных действий в контекст
+                if actions_log:
+                    summary_lines = "\n".join(f"  {i}. {a}" for i, a in enumerate(actions_log, 1))
+                    actions_summary = (
+                        "--- ВЫПОЛНЕННЫЕ ДЕЙСТВИЯ ДО СЕГО МОМЕНТА ---\n"
+                        f"{summary_lines}\n"
+                        "--- КОНЕЦ СВОДКИ ---\n\n"
+                        "Используй эту информацию. Не повторяй уже выполненные действия."
+                    )
+                    # Убираем предыдущую сводку, если была
+                    if messages_to_send and messages_to_send[-1].get("content", "").startswith("--- ВЫПОЛНЕННЫЕ ДЕЙСТВИЯ"):
+                        messages_to_send.pop()
+                    messages_to_send.append({"role": "user", "content": actions_summary})
 
                 max_retries = 5
                 base_delay = 1
@@ -326,6 +392,11 @@ async def chat(request: ChatRequest):
                             await session.commit()
 
                         yield f"event: tool_result\ndata: {json.dumps({'tool': tool_name, 'result': result})}\n\n"
+
+                        # Логируем действие в сводку
+                        action_summary = _summarize_tool_action(tool_name, tool_data, result)
+                        if action_summary:
+                            actions_log.append(action_summary)
 
                         if tool_name != "stop":
                             tools_were_called = True

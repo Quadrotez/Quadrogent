@@ -145,7 +145,7 @@ export default function ProviderManager({ onSaved, onClose }) {
 
                 {expandedProvider === p.name && (
                   <div className="pm-provider-body">
-                    {p.name !== "ollama" && (
+                    {p.needs_api_key && (
                       <div className="pm-field">
                         <label>API Key</label>
                         <input

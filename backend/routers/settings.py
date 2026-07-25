@@ -60,6 +60,7 @@ async def get_providers(db: AsyncSession = Depends(get_db)):
             "type": info["type"],
             "color": info["color"],
             "default_base_url": info["default_base_url"],
+            "needs_api_key": needs_api_key,
             "configured": True if not needs_api_key else bool(record and record.api_key),
             "enabled": bool(record.enabled if record else 1),
             "base_url": record.base_url if record else None,
@@ -146,12 +147,15 @@ async def test_provider(name: str, db: AsyncSession = Depends(get_db)):
             return {"status": "error", "message": str(e)}
     else:
         # OpenAI-совместимые провайдеры
-        if not record or not record.api_key:
+        api_key = record.api_key if record and record.api_key else None
+        if not api_key and name == "opencode":
+            api_key = "public"
+        if not api_key:
             return {"status": "error", "message": "API ключ не задан"}
 
         base_url = (record.base_url if record and record.base_url else None) or provider_info["default_base_url"]
         proxy = (record.proxy_url if record and record.proxy_url else None) or None
-        headers = {"Authorization": f"Bearer {record.api_key}"}
+        headers = {"Authorization": f"Bearer {api_key}"}
 
         try:
             async with httpx.AsyncClient(timeout=10.0, proxy=proxy) as client:
