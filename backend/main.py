@@ -55,7 +55,29 @@ async def lifespan(app: FastAPI):
             res = await session.execute(select(Setting).where(Setting.key == key))
             if not res.scalar_one_or_none():
                 session.add(Setting(key=key, value=value))
-                
+
+        # Agent behavior settings
+        agent_defaults = {
+            "self_context": "",        # сохранённый контекст агента
+            "multi_command": "true",   # разрешить несколько tool calls за раз
+            "tool_calling_mode": "native",  # native или json
+        }
+        for key, value in agent_defaults.items():
+            res = await session.execute(select(Setting).where(Setting.key == key))
+            if not res.scalar_one_or_none():
+                session.add(Setting(key=key, value=value))
+
+        # Web search settings
+        web_defaults = {
+            "search_providers": "duckduckgo",  # comma-separated: duckduckgo,google,yandex,bing
+            "search_proxy": "",                 # proxy URL for search requests
+            "web_fetch_enabled": "true",        # enable/disable web_fetch tool
+        }
+        for key, value in web_defaults.items():
+            res = await session.execute(select(Setting).where(Setting.key == key))
+            if not res.scalar_one_or_none():
+                session.add(Setting(key=key, value=value))
+
         await session.commit()
     yield
 

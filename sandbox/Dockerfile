@@ -9,7 +9,20 @@ RUN apk add --no-cache \
     py3-pip \
     zip \
     unzip \
-    sudo
+    sudo \
+    gcc \
+    g++ \
+    make \
+    python3-dev \
+    sdl2-dev \
+    sdl2_image-dev \
+    sdl2_mixer-dev \
+    sdl2_ttf-dev \
+    freetype-dev \
+    libpng-dev \
+    jpeg-dev \
+    portmidi-dev \
+    file
 
 RUN echo '#!/bin/bash' > /usr/local/bin/apt-get && \
     echo 'if [[ "$1" == "install" ]]; then shift; sudo apk add --no-cache "$@"; else echo "Only install command is wrapped"; fi' >> /usr/local/bin/apt-get && \

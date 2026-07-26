@@ -2,6 +2,7 @@ import json
 from typing import AsyncIterator
 import httpx
 from sqlalchemy import select
+from openai_client import StreamResult
 from database import async_session
 from models import Setting, ApiKey
 
@@ -17,7 +18,6 @@ async def is_configured() -> bool:
 async def get_ollama_url() -> str:
     """Читает base_url Ollama: сначала из api_keys, потом из settings (backward compat)."""
     async with async_session() as session:
-        # Приоритет: api_keys таблица (ProviderManager)
         result = await session.execute(
             select(ApiKey).where(ApiKey.provider == "ollama")
         )
@@ -25,7 +25,6 @@ async def get_ollama_url() -> str:
         if record and record.base_url:
             return record.base_url.rstrip("/")
 
-        # Fallback: settings таблица (старый формат)
         result = await session.execute(
             select(Setting).where(Setting.key == "ollama_base_url")
         )
@@ -38,12 +37,12 @@ async def get_model_settings() -> dict:
         keys = ["model_num_ctx", "model_temperature", "model_top_p", "model_max_tokens"]
         result = await session.execute(select(Setting).where(Setting.key.in_(keys)))
         settings = {s.key: s.value for s in result.scalars().all()}
-        
+
         return {
             "num_ctx": int(settings.get("model_num_ctx", 8192)),
             "temperature": float(settings.get("model_temperature", 0.0)),
             "top_p": float(settings.get("model_top_p", 0.9)),
-            "max_tokens": int(settings.get("model_max_tokens", 4096))
+            "max_tokens": int(settings.get("model_max_tokens", 4096)),
         }
 
 
@@ -68,8 +67,13 @@ async def get_running_models() -> list[dict]:
 async def chat_stream(
     model: str,
     messages: list[dict],
-) -> AsyncIterator[str]:
-    """Стриминг ответа от Ollama. Возвращает куски текста."""
+    tools: list[dict] | None = None,
+) -> AsyncIterator[str | StreamResult]:
+    """Стриминг ответа от Ollama.
+
+    Yield'ит куски текста (str) для стриминга в UI.
+    Последний элемент — StreamResult с полным текстом и tool_calls.
+    """
     base_url = await get_ollama_url()
     model_settings = await get_model_settings()
     payload = {
@@ -81,8 +85,15 @@ async def chat_stream(
             "temperature": model_settings["temperature"],
             "top_p": model_settings["top_p"],
             "num_predict": model_settings["max_tokens"],
-        }
+        },
     }
+
+    if tools:
+        payload["tools"] = tools
+
+    accumulated_text = ""
+    # Accumulate streaming tool calls by index (like OpenAI client)
+    tool_call_buffers: dict[int, dict] = {}
 
     async with httpx.AsyncClient(timeout=None) as client:
         async with client.stream(
@@ -99,11 +110,53 @@ async def chat_stream(
                 except json.JSONDecodeError:
                     continue
 
-                # Ollama возвращает {"message": {"content": "..."}}
-                content = chunk.get("message", {}).get("content", "")
+                message = chunk.get("message", {})
+                content = message.get("content", "")
                 if content:
+                    accumulated_text += content
                     yield content
 
-                # Последний чанк — done=True
+                # Ollama streams tool_calls in message.tool_calls
+                stream_tool_calls = message.get("tool_calls") or []
+                for tc in stream_tool_calls:
+                    idx = tc.get("index", 0)
+                    if idx not in tool_call_buffers:
+                        tool_call_buffers[idx] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    buf = tool_call_buffers[idx]
+
+                    func = tc.get("function", {})
+                    name = func.get("name", "")
+                    if name:
+                        buf["name"] = name
+                        if not buf["id"]:
+                            buf["id"] = f"call_{name}"
+
+                    args = func.get("arguments", {})
+                    if isinstance(args, dict) and args:
+                        buf["arguments"] = json.dumps(args)
+                    elif isinstance(args, str) and args:
+                        buf["arguments"] += args
+
                 if chunk.get("done"):
                     break
+
+    # Build final tool_calls list
+    final_tool_calls = []
+    for idx in sorted(tool_call_buffers.keys()):
+        buf = tool_call_buffers[idx]
+        if buf["name"]:
+            try:
+                args = json.loads(buf["arguments"]) if buf["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            final_tool_calls.append({
+                "id": buf["id"],
+                "name": buf["name"],
+                "arguments": args,
+            })
+
+    yield StreamResult(text=accumulated_text, tool_calls=final_tool_calls)

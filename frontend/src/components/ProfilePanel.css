@@ -40,3 +40,38 @@
 .settings-textarea--tall {
   min-height: 200px;
 }
+
+.search-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.3rem;
+}
+
+.search-provider-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #e0e0e0;
+  cursor: pointer;
+  background: #1a1a1a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.search-provider-checkbox:hover {
+  border-color: #555;
+}
+
+.search-provider-checkbox:has(input:checked) {
+  background: #0066cc22;
+  border-color: #0066cc;
+}
+
+.search-provider-checkbox input[type="checkbox"] {
+  accent-color: #0066cc;
+  cursor: pointer;
+}

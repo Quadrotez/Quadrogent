@@ -10,15 +10,15 @@ SANDBOX_API_URL = os.getenv("SANDBOX_API_URL", "http://localhost:5000")
 
 class SandboxManager:
     @staticmethod
-    def run_command(command: str, timeout: int = 60, user: str = "quadrogent"):
+    async def run_command(command: str, timeout: int = 60, user: str = "quadrogent"):
         try:
-            resp = httpx.post(
-                f"{SANDBOX_API_URL}/exec",
-                json={"command": command, "timeout": timeout, "user": user},
-                timeout=timeout + 5,
-            )
-            resp.raise_for_status()
-            return resp.json()
+            async with httpx.AsyncClient(timeout=timeout + 30) as client:
+                resp = await client.post(
+                    f"{SANDBOX_API_URL}/exec",
+                    json={"command": command, "timeout": timeout, "user": user},
+                )
+                resp.raise_for_status()
+                return resp.json()
         except httpx.TimeoutException:
             return {"stdout": "", "stderr": "Timeout expired", "exit_code": -1}
         except Exception as e:
@@ -26,26 +26,26 @@ class SandboxManager:
             return {"stdout": "", "stderr": str(e), "exit_code": -1}
 
     @staticmethod
-    def write_file(path: str, content: str):
+    async def write_file(path: str, content: str):
         try:
-            resp = httpx.post(
-                f"{SANDBOX_API_URL}/write",
-                json={"path": path, "content": content},
-                timeout=30,
-            )
-            resp.raise_for_status()
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{SANDBOX_API_URL}/write",
+                    json={"path": path, "content": content},
+                )
+                resp.raise_for_status()
         except Exception as e:
             logger.error(f"Sandbox write error: {e}")
 
     @staticmethod
-    def write_file_binary(path: str, content: bytes):
+    async def write_file_binary(path: str, content: bytes):
         try:
-            resp = httpx.post(
-                f"{SANDBOX_API_URL}/write-binary",
-                json={"path": path, "content": base64.b64encode(content).decode()},
-                timeout=30,
-            )
-            resp.raise_for_status()
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{SANDBOX_API_URL}/write-binary",
+                    json={"path": path, "content": base64.b64encode(content).decode()},
+                )
+                resp.raise_for_status()
         except Exception as e:
             logger.error(f"Sandbox write-binary error: {e}")
 

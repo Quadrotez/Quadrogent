@@ -49,44 +49,6 @@ function MarkdownBlock({ content }) {
 export default function MarkdownMessage({ content }) {
   let finalContent = content;
 
-  // Если контент содержит JSON в markdown-блоке, извлекаем его
-  const markdownJsonMatch = content.match(/```(?:json)?\n([\s\S]*?)\n```/);
-  if (markdownJsonMatch) {
-    try {
-      const parsed = JSON.parse(markdownJsonMatch[1]);
-      if (parsed.mode === "chat") {
-        const chatText = Array.isArray(parsed.content)
-          ? parsed.content.join("\n")
-          : parsed.content || "";
-        finalContent = content.replace(markdownJsonMatch[0], chatText);
-      } else if (parsed.mode === "tool_calling") {
-        finalContent = content.replace(markdownJsonMatch[0], "");
-      }
-    } catch {
-      // Если невалидный JSON, оставляем как есть
-    }
-  }
-
-  // Обработка старого формата JSON без markdown-блока
-  const jsonRegex = /\{[\s\S]*?\}/g;
-  let chatContentFromOldFormat = "";
-  finalContent = finalContent.replace(jsonRegex, (match) => {
-    try {
-      const parsed = JSON.parse(match);
-      if (parsed.mode === "chat") {
-        const c = Array.isArray(parsed.content)
-          ? parsed.content.join("\n")
-          : parsed.content || "";
-        chatContentFromOldFormat += c + "\n";
-      }
-      return "";
-    } catch {
-      return match;
-    }
-  }).trim();
-
-  finalContent = (finalContent + "\n" + chatContentFromOldFormat).trim();
-
   // Парсим think-теги
   const { segments, hasThinking } = useMemo(
     () => parseThinkTags(finalContent),

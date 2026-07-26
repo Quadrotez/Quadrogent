@@ -46,7 +46,10 @@ export default function App() {
   const [attachedFiles, setAttachedFiles] = useState([]);
 
   const [chats, setChats] = useState([]);
-  const [currentChatId, setCurrentChatId] = useState(null);
+  const [currentChatId, setCurrentChatId] = useState(() => {
+    const m = window.location.pathname.match(/^\/chat\/(\d+)$/);
+    return m ? parseInt(m[1], 10) : null;
+  });
 
   const [showProviders, setShowProviders] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -62,6 +65,12 @@ export default function App() {
     model_top_p: "0.9",
     model_max_tokens: "4096",
     generate_titles: "false",
+    multi_command: "true",
+    self_context: "",
+    tool_calling_mode: "native",
+    search_providers: "duckduckgo",
+    search_proxy: "",
+    web_fetch_enabled: "true",
   });
 
   const [sandboxOpen, setSandboxOpen] = useState(false);
@@ -76,6 +85,8 @@ export default function App() {
 
   const abortControllerRef = useRef(null);
   const pollTimerRef = useRef(null);
+  const pendingToolCallsRef = useRef([]);
+  const needsNewlineRef = useRef(false);
 
   // --- Загрузка моделей ---
   const loadModels = () => {
@@ -127,7 +138,33 @@ export default function App() {
         }
       })
       .catch(() => {});
+
+    // Load chat from URL if present
+    const m = window.location.pathname.match(/^\/chat\/(\d+)$/);
+    if (m) {
+      const chatId = parseInt(m[1], 10);
+      loadChatById(chatId);
+    }
   }, []);
+
+  // --- Browser back/forward ---
+  useEffect(() => {
+    const onPopState = () => {
+      const m = window.location.pathname.match(/^\/chat\/(\d+)$/);
+      const chatId = m ? parseInt(m[1], 10) : null;
+      if (chatId !== currentChatId) {
+        setCurrentChatId(chatId);
+        if (chatId) {
+          loadChatById(chatId);
+        } else {
+          setMessages([]);
+          setInput("");
+        }
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [currentChatId, isLoading]);
 
   // --- Настройки ---
   const handleSaveProfile = async () => {
@@ -184,11 +221,10 @@ export default function App() {
     setMessages([]);
     setInput("");
     setError("");
+    window.history.pushState({}, "", "/");
   };
 
-  const handleSelectChat = async (chatId) => {
-    if (isLoading) return;
-    setCurrentChatId(chatId);
+  const loadChatById = async (chatId) => {
     setError("");
     try {
       const chatData = await fetchChat(chatId);
@@ -239,13 +275,36 @@ export default function App() {
 
       for (const msg of rawMessages) {
         if (msg.role === "assistant") {
-          builtMessages.push({
-            role: "assistant",
-            content: msg.content,
-            toolCallsBefore: pendingTCs,
-            presentedFiles: presentedFilesByMsgId[msg.id] || [],
-          });
-          pendingTCs = msg.toolCalls;
+          // Tool calls из БД привязаны к msg.id (ToolCall.message_id = msg.id)
+          // Дополнительно берём pendingTCs от предыдущего сообщения (legacy)
+          const allTCs = [...pendingTCs, ...msg.toolCalls];
+          pendingTCs = [];
+
+          if (allTCs.length > 0 && !msg.content) {
+            // Только tool calls без текста — tool calls идут СВЕРХУ, текста нет
+            builtMessages.push({
+              role: "assistant",
+              content: "",
+              toolCallsBefore: allTCs,
+              presentedFiles: presentedFilesByMsgId[msg.id] || [],
+            });
+          } else if (allTCs.length > 0 && msg.content) {
+            // И текст, и tool calls — tool calls сверху, текст снизу
+            builtMessages.push({
+              role: "assistant",
+              content: msg.content,
+              toolCallsBefore: allTCs,
+              presentedFiles: presentedFilesByMsgId[msg.id] || [],
+            });
+          } else {
+            // Только текст
+            builtMessages.push({
+              role: "assistant",
+              content: msg.content,
+              toolCallsBefore: [],
+              presentedFiles: presentedFilesByMsgId[msg.id] || [],
+            });
+          }
         } else {
           if (pendingTCs.length > 0) {
             builtMessages.push({
@@ -272,6 +331,17 @@ export default function App() {
       console.error(e);
       setError("Не удалось загрузить чат");
     }
+  };
+
+  const handleSelectChat = async (chatId) => {
+    if (isLoading) return;
+    setCurrentChatId(chatId);
+    if (chatId) {
+      window.history.pushState({ chatId }, "", `/chat/${chatId}`);
+    } else {
+      window.history.pushState({}, "", "/");
+    }
+    await loadChatById(chatId);
   };
 
   const handleExportChat = async (chatId, e) => {
@@ -372,6 +442,7 @@ export default function App() {
 
     setError("");
     setIsLoading(true);
+    pendingToolCallsRef.current = [];
 
     let finalInput = input.trim();
     if (attachedFiles.length > 0) {
@@ -422,13 +493,20 @@ export default function App() {
           stopPollingModelStatus();
           setStatus("generating");
         }
+        if (needsNewlineRef.current) {
+          needsNewlineRef.current = false;
+          chunk = "\n" + chunk;
+        }
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last?.role === "assistant") {
+            const buffered = pendingToolCallsRef.current;
+            pendingToolCallsRef.current = [];
             updated[updated.length - 1] = {
               ...last,
               content: last.content + chunk,
+              toolCallsBefore: [...(last.toolCallsBefore || []), ...buffered],
             };
           }
           return updated;
@@ -440,42 +518,8 @@ export default function App() {
         setIsLoading(false);
         setStatus("idle");
         abortControllerRef.current = null;
-
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === "assistant" && last.content && (!last.toolCallsBefore || last.toolCallsBefore.length === 0)) {
-            let jsonStr = null;
-            const markdownMatch = last.content.match(/```(?:json)?\n([\s\S]*?)\n```/);
-            if (markdownMatch) {
-              jsonStr = markdownMatch[1];
-            } else {
-              const start = last.content.indexOf("{");
-              const end = last.content.lastIndexOf("}");
-              if (start !== -1 && end !== -1) {
-                jsonStr = last.content.slice(start, end + 1);
-              }
-            }
-            if (jsonStr) {
-              try {
-                const parsed = JSON.parse(jsonStr);
-                if (parsed.mode === "tool_calling") {
-                  const toolInput = Object.fromEntries(
-                    Object.entries(parsed).filter(([k]) => k !== "mode" && k !== "tool")
-                  );
-                  const updated = [...prev];
-                  updated[prev.length - 1] = {
-                    ...last,
-                    toolCallsBefore: [{ tool: parsed.tool, input: toolInput, result: null }],
-                    content: "",
-                  };
-                  return updated;
-                }
-              } catch {}
-            }
-          }
-          return prev;
-        });
-
+        pendingToolCallsRef.current = [];
+        needsNewlineRef.current = false;
         loadChats();
       },
       // onError
@@ -518,53 +562,44 @@ export default function App() {
       currentChatId,
       // onChatId
       (newChatId) => {
-        if (!currentChatId) setCurrentChatId(newChatId);
+        if (!currentChatId) {
+          setCurrentChatId(newChatId);
+          window.history.pushState({ chatId: newChatId }, "", `/chat/${newChatId}`);
+        }
       },
       // onToolResult
       (toolResult) => {
-        const { tool, result } = toolResult;
+        const { tool, input: toolInput, result } = toolResult;
+        needsNewlineRef.current = true;
 
         setMessages((prev) => {
           const updated = [...prev];
           const lastIdx = updated.length - 1;
           const last = updated[lastIdx];
-          
-          let toolInput = null;
-          if (last?.role === "assistant" && last.content) {
-            let jsonStr = null;
-            const markdownMatch = last.content.match(/```(?:json)?\n([\s\S]*?)\n```/);
-            if (markdownMatch) {
-              jsonStr = markdownMatch[1];
-            } else {
-              const start = last.content.indexOf("{");
-              const end = last.content.lastIndexOf("}");
-              if (start !== -1 && end !== -1) {
-                jsonStr = last.content.slice(start, end + 1);
-              }
-            }
-
-            if (jsonStr) {
-              try {
-                const parsed = JSON.parse(jsonStr);
-                if (parsed.mode === "tool_calling") {
-                  toolInput = Object.fromEntries(
-                    Object.entries(parsed).filter(([k]) => k !== "mode" && k !== "tool")
-                  );
-                }
-              } catch {}
-            }
-          }
-
-          const tcEntry = { tool, input: toolInput, result };
 
           if (last?.role === "assistant") {
+            const tcs = last.toolCallsBefore || [];
+            // Find a pending entry (result === null) with matching tool name and update it
+            const pendingIdx = tcs.findIndex(
+              (tc) => tc.tool === tool && tc.result === null
+            );
+            if (pendingIdx !== -1) {
+              const newTCs = [...tcs];
+              newTCs[pendingIdx] = { ...newTCs[pendingIdx], result };
+              updated[lastIdx] = { ...last, toolCallsBefore: newTCs };
+              return updated;
+            }
+            // No pending entry found — append new
             updated[lastIdx] = {
               ...last,
-              toolCallsBefore: [...(last.toolCallsBefore || []), tcEntry],
-              content: "",
+              toolCallsBefore: [...tcs, { tool, input: toolInput, result }],
             };
+            return updated;
           }
-          return updated;
+
+          // No assistant message yet — buffer
+          pendingToolCallsRef.current.push({ tool, input: toolInput, result });
+          return prev;
         });
 
         if (tool === "present" && result?.exit_code === 0) {
@@ -592,12 +627,38 @@ export default function App() {
         }
       },
       // onTitle
-      (title) => {
+      (titleData) => {
+        const title = typeof titleData === "string" ? titleData : titleData.title;
+        const chatId = typeof titleData === "object" ? titleData.chat_id : currentChatId;
         setChats((prev) =>
           prev.map((c) =>
-            c.id === currentChatId ? { ...c, title } : c
+            c.id === chatId ? { ...c, title } : c
           )
         );
+      },
+      // onToolExecuting
+      (toolExec) => {
+        if (!firstChunkReceived) {
+          firstChunkReceived = true;
+          stopPollingModelStatus();
+          setStatus("generating");
+        }
+        const { tool, input: toolInput } = toolExec;
+        const tcEntry = { tool, input: toolInput, result: null };
+
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastIdx = updated.length - 1;
+          const last = updated[lastIdx];
+
+          if (last?.role === "assistant") {
+            updated[lastIdx] = {
+              ...last,
+              toolCallsBefore: [...(last.toolCallsBefore || []), tcEntry],
+            };
+          }
+          return updated;
+        });
       }
     );
   };

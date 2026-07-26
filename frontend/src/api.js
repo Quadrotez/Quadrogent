@@ -81,7 +81,7 @@ export async function deleteChat(chatId) {
   return res.json();
 }
 
-export async function streamChat(model, messages, onChunk, onDone, onError, signal, chatId = null, onChatId = null, onToolResult = null, onTitle = null) {
+export async function streamChat(model, messages, onChunk, onDone, onError, signal, chatId = null, onChatId = null, onToolResult = null, onTitle = null, onToolExecuting = null) {
   try {
     const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
@@ -100,7 +100,7 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
             const waitTime = (parseFloat(retryAfter) + 1) * 1000;
             onChunk(`\n\n*Система: Превышен лимит запросов. Повторная попытка через ${Math.round(waitTime/1000)} сек...*\n\n`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
-            return streamChat(model, messages, onChunk, onDone, onError, signal, chatId, onChatId, onToolResult);
+            return streamChat(model, messages, onChunk, onDone, onError, signal, chatId, onChatId, onToolResult, null, onToolExecuting);
           }
         } catch (e) {
           console.error("Не удалось распарсить ошибку 429", e);
@@ -130,12 +130,14 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
         let isErrorEvent = false;
         let isChatIdEvent = false;
         let isToolResultEvent = false;
+        let isToolExecutingEvent = false;
         let isTitleEvent = false;
 
         for (const line of lines) {
           if (line.trim() === "event: error") isErrorEvent = true;
           if (line.trim() === "event: chat_id") isChatIdEvent = true;
           if (line.trim() === "event: tool_result") isToolResultEvent = true;
+          if (line.trim() === "event: tool_executing") isToolExecutingEvent = true;
           if (line.trim() === "event: title") isTitleEvent = true;
         }
 
@@ -164,6 +166,17 @@ export async function streamChat(model, messages, onChunk, onDone, onError, sign
                     onToolResult(JSON.parse(payload));
                 } catch (e) {
                     console.error("Error parsing tool_result payload:", e);
+                }
+            }
+            continue;
+          }
+
+          if (isToolExecutingEvent) {
+            if (onToolExecuting) {
+                try {
+                    onToolExecuting(JSON.parse(payload));
+                } catch (e) {
+                    console.error("Error parsing tool_executing payload:", e);
                 }
             }
             continue;

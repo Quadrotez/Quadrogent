@@ -47,21 +47,7 @@ export default function MessageList({ messages, isLoading, status, models }) {
         const isLastMsg = index === messages.length - 1;
 
         // Определяем финальный контент для assistant-сообщения
-        // (MarkdownMessage вырезает JSON tool-calling, оставляя только chat-текст)
-        let displayContent = msg.content;
-        if (msg.role === "assistant" && msg.content) {
-          // Проверяем, не является ли контент чистым JSON tool_calling (без текста)
-          const jsonRegex = /\{[\s\S]*?\}/g;
-          const stripped = msg.content.replace(jsonRegex, (match) => {
-            try {
-              const p = JSON.parse(match);
-              if (p.mode === "tool_calling") return "";
-              if (p.mode === "chat") return p.content || "";
-              return match;
-            } catch { return match; }
-          }).trim();
-          displayContent = stripped;
-        }
+        let displayContent = msg.content || "";
 
         const hasText = !!displayContent;
         const hasFiles = msg.presentedFiles && msg.presentedFiles.length > 0;
@@ -73,7 +59,7 @@ export default function MessageList({ messages, isLoading, status, models }) {
 
         return (
           <div key={index} className={`message ${msg.role}`}>
-            {/* Вызовы инструментов, встроенные ДО текста ответа */}
+            {/* Вызовы инструментов — ПЕРЕД текстом (порядок выполнения: инструменты потом текст) */}
             {hasTCs && msg.toolCallsBefore.map((tc, ti) => (
               <ToolCallBlock
                 key={`before-${ti}`}

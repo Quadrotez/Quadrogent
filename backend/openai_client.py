@@ -2,6 +2,7 @@
 
 import json
 import time
+from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
 
 import httpx
@@ -32,15 +33,13 @@ def parse_retry_after(error_body: str, provider: str) -> ProviderRateLimitError 
     try:
         data = json.loads(error_body)
 
-        # OpenRouter: {"error": {"message": "...", "code": 429, "metadata": {"headers": {"X-RateLimit-Reset": "..."}}}}
         error_info = data.get("error") or {}
         message = error_info.get("message", "Rate limit exceeded")
         metadata = error_info.get("metadata") or {}
         headers = metadata.get("headers") or {}
 
-        retry_after = 5.0  # fallback
+        retry_after = 5.0
 
-        # X-RateLimit-Reset (epoch ms) — OpenRouter
         reset_ms = headers.get("X-RateLimit-Reset")
         if reset_ms:
             try:
@@ -130,10 +129,24 @@ async def list_models(provider: str) -> list[dict]:
         return result
 
 
+@dataclass
+class StreamResult:
+    """Результат стриминга: текст +.tool_calls."""
+    text: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
+
+
 async def chat_stream(
-    provider: str, model: str, messages: list[dict]
-) -> AsyncIterator[str]:
-    """Стриминг ответа от OpenAI-совместимого провайдера (SSE)."""
+    provider: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+) -> AsyncIterator[str | StreamResult]:
+    """Стриминг ответа от OpenAI-совместимого провайдера.
+
+    Yield'ит куски текста (str) для стриминга в UI.
+    Последний элемент — StreamResult с полным текстом и tool_calls.
+    """
     record = await _get_api_key_record(provider)
     api_key = record.api_key if record and record.api_key else None
     if not api_key and provider == "opencode":
@@ -159,6 +172,13 @@ async def chat_stream(
         "top_p": model_settings["top_p"],
         "max_tokens": model_settings["max_tokens"],
     }
+
+    if tools:
+        payload["tools"] = tools
+
+    accumulated_text = ""
+    # Accumulate streaming tool calls: {index: {id, name, arguments}}
+    tool_call_buffers: dict[int, dict] = {}
 
     async with httpx.AsyncClient(timeout=None, proxy=proxy) as client:
         async with client.stream(
@@ -186,7 +206,7 @@ async def chat_stream(
                 if not line or not line.startswith("data:"):
                     continue
 
-                data_str = line[len("data:") :].strip()
+                data_str = line[len("data:"):].strip()
                 if data_str == "[DONE]":
                     break
 
@@ -200,6 +220,51 @@ async def chat_stream(
                     continue
 
                 delta = choices[0].get("delta") or {}
+
+                # Text content
                 content = delta.get("content")
                 if content:
+                    accumulated_text += content
                     yield content
+
+                # Tool call deltas (streamed incrementally)
+                raw_tool_calls = delta.get("tool_calls") or []
+                for tc_delta in raw_tool_calls:
+                    idx = tc_delta.get("index", 0)
+                    if idx not in tool_call_buffers:
+                        tool_call_buffers[idx] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    buf = tool_call_buffers[idx]
+
+                    tc_id = tc_delta.get("id")
+                    if tc_id:
+                        buf["id"] = tc_id
+
+                    func = tc_delta.get("function") or {}
+                    func_name = func.get("name")
+                    if func_name:
+                        buf["name"] = func_name
+
+                    args_delta = func.get("arguments")
+                    if args_delta:
+                        buf["arguments"] += args_delta
+
+    # Build final tool_calls list
+    final_tool_calls = []
+    for idx in sorted(tool_call_buffers.keys()):
+        buf = tool_call_buffers[idx]
+        if buf["name"]:
+            try:
+                args = json.loads(buf["arguments"]) if buf["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            final_tool_calls.append({
+                "id": buf["id"],
+                "name": buf["name"],
+                "arguments": args,
+            })
+
+    yield StreamResult(text=accumulated_text, tool_calls=final_tool_calls)
