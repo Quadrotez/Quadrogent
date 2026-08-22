@@ -121,7 +121,14 @@ async def _generate_title(provider_name: str, provider_type: str, real_model: st
                 return data.get("message", {}).get("content", "").strip().strip('"\'')
 
         record = await openai_client._get_api_key_record(provider_name)
-        api_key = record.api_key if record else ""
+        api_key = record.api_key if record and record.api_key else None
+        # OpenCode использует публичный ключ по умолчанию — так же, как основной клиент.
+        if not api_key and provider_name == "opencode":
+            api_key = "public"
+        if not api_key:
+            logger.warning("Не удалось сгенерировать заголовок: провайдер %s не настроен", provider_name)
+            return None
+
         base_url = await openai_client.get_base_url(provider_name)
         proxy_url = getattr(record, "proxy_url", None) or None
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
