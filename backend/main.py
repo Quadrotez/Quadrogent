@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
         agent_defaults = {
             "self_context": "",        # сохранённый контекст агента
             "multi_command": "true",   # разрешить несколько tool calls за раз
+            "max_consecutive_tool_calls": "15",  # предельное число инструментов в одной цепочке
             "tool_calling_mode": "native",  # native или json
         }
         for key, value in agent_defaults.items():

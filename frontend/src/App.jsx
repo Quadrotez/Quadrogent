@@ -66,6 +66,7 @@ export default function App() {
     model_max_tokens: "4096",
     generate_titles: "false",
     multi_command: "true",
+    max_consecutive_tool_calls: "15",
     self_context: "",
     tool_calling_mode: "native",
     search_providers: "duckduckgo",
@@ -221,7 +222,7 @@ export default function App() {
     setMessages([]);
     setInput("");
     setError("");
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/new");
   };
 
   const loadChatById = async (chatId) => {

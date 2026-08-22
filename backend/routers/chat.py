@@ -194,6 +194,26 @@ async def _is_multi_command_enabled() -> bool:
         return row.value != "false" if row and row.value else True
 
 
+async def _get_max_consecutive_tool_calls() -> int:
+    """Читает ограничение длины непрерывной цепочки вызовов инструментов."""
+    default_limit = 15
+    minimum_limit = 1
+    maximum_limit = 50
+
+    async with async_session() as session:
+        res = await session.execute(
+            select(Setting).where(Setting.key == "max_consecutive_tool_calls")
+        )
+        row = res.scalar_one_or_none()
+
+    try:
+        value = int(row.value) if row and row.value is not None else default_limit
+    except (TypeError, ValueError):
+        value = default_limit
+
+    return max(minimum_limit, min(value, maximum_limit))
+
+
 async def _get_tool_calling_mode() -> str:
     """Читает режим tool calling: 'native' или 'json'."""
     async with async_session() as session:
@@ -436,6 +456,7 @@ async def chat(request: ChatRequest):
 
         # Получаем настройки
         multi_command = await _is_multi_command_enabled()
+        max_consecutive_tool_calls = await _get_max_consecutive_tool_calls()
         tool_calling_mode = await _get_tool_calling_mode()
 
         # Схемы инструментов для API (только для native режима)
@@ -490,14 +511,11 @@ async def chat(request: ChatRequest):
                     yield f"event: title\ndata: {json.dumps({'chat_id': chat_id, 'title': title})}\n\n"
 
             # --- Цикл tool calling ---
-            max_iterations = 15
-            iteration = 0
+            tool_call_count = 0
             tools_were_called = False
             actions_log = []
 
-            while iteration < max_iterations:
-                iteration += 1
-
+            while True:
                 # Добавляем сводку выполненных действий в контекст
                 if actions_log:
                     summary_lines = "\n".join(f"  {i}. {a}" for i, a in enumerate(actions_log, 1))
@@ -579,6 +597,22 @@ async def chat(request: ChatRequest):
                     tool_calls = _parse_json_tool_calls(full_response)
 
                 if tool_calls:
+                    if tool_call_count >= max_consecutive_tool_calls:
+                        logger.info(
+                            "Достигнут лимит цепочки инструментов: %s",
+                            max_consecutive_tool_calls,
+                        )
+                        full_response = (
+                            "Достигнут настроенный лимит последовательных вызовов "
+                            f"инструментов ({max_consecutive_tool_calls})."
+                        )
+                        async with async_session() as session:
+                            session.add(Message(
+                                chat_id=chat_id, role="assistant", content=full_response,
+                            ))
+                            await session.commit()
+                        break
+
                     # Сохраняем ОДИН ответ ассистента (с текстом, если есть)
                     async with async_session() as session:
                         assistant_msg = Message(
@@ -590,9 +624,15 @@ async def chat(request: ChatRequest):
                         await session.commit()
 
                     # Выполняем все tool calls и собираем результаты
-                    # Если multi_command выключен — только первый вызов
+                    # Если multi_command выключен — только первый вызов.
                     if not multi_command:
                         tool_calls = tool_calls[:1]
+
+                    # Не выполняем больше инструментов, чем разрешено настройкой.
+                    remaining_tool_calls = max_consecutive_tool_calls - tool_call_count
+                    tool_calls = tool_calls[:remaining_tool_calls]
+                    tool_call_count += len(tool_calls)
+
                     tool_results = {}
                     should_stop = False
                     for tc in tool_calls:

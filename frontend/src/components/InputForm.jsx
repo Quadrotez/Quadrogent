@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import "./InputForm.css";
 
 export default function InputForm({
@@ -14,6 +14,12 @@ export default function InputForm({
   onStop,
 }) {
   const textareaRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (!input && textareaRef.current) {
+      textareaRef.current.style.height = "";
+    }
+  }, [input]);
 
   const autoResize = (e) => {
     const el = e.target;

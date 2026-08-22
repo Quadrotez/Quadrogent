@@ -223,6 +223,23 @@ export default function ProfilePanel({
                 </label>
               </div>
 
+              <div className="setting-group">
+                <label>Максимум последовательных инструментов</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  className="settings-input"
+                  value={modelSettings.max_consecutive_tool_calls || "15"}
+                  onChange={(e) =>
+                    handleModelSettingChange("max_consecutive_tool_calls", e.target.value)
+                  }
+                />
+                <span className="setting-info">
+                  Сколько инструментов ИИ может выполнить подряд в одном сообщении. Допустимо от 1 до 50; по умолчанию — 15.
+                </span>
+              </div>
+
               <div className="setting-group setting-toggle-group">
                 <label className="setting-toggle-label">
                   <span>

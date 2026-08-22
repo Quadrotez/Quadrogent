@@ -36,6 +36,30 @@ class FakeAsyncClient:
         return FakeResponse()
 
 
+class FakeSettingsResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        if self.value is None:
+            return None
+        return type("SettingValue", (), {"value": self.value})()
+
+
+class FakeSettingsSession:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+    async def execute(self, _statement):
+        return FakeSettingsResult(self.value)
+
+
 class TitleGenerationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         FakeAsyncClient.requests = []
@@ -54,6 +78,16 @@ class TitleGenerationTests(unittest.IsolatedAsyncioTestCase):
             FakeAsyncClient.requests[0]["headers"]["Authorization"],
             "Bearer public",
         )
+
+    async def test_tool_call_limit_is_normalized(self):
+        async def get_limit(value):
+            with patch.object(chat, "async_session", lambda: FakeSettingsSession(value)):
+                return await chat._get_max_consecutive_tool_calls()
+
+        self.assertEqual(await get_limit("7"), 7)
+        self.assertEqual(await get_limit("0"), 1)
+        self.assertEqual(await get_limit("500"), 50)
+        self.assertEqual(await get_limit("not-a-number"), 15)
 
     async def test_unconfigured_cloud_provider_skips_title_request(self):
         with (
