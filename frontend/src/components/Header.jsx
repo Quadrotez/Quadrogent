@@ -1,3 +1,4 @@
+import { FolderIcon } from "@heroicons/react/24/outline";
 import ModelSelector from "./ModelSelector";
 import "./Header.css";
 
@@ -20,7 +21,7 @@ export default function Header({ models, selectedModel, isLoading, onModelSelect
             onClick={onOpenSandbox}
             title="Файлы песочницы"
           >
-            📁
+            <FolderIcon className="heroicon" aria-hidden="true" />
           </button>
         )}
         {sandboxOpen && sandboxMode === "modal" && (
@@ -30,7 +31,7 @@ export default function Header({ models, selectedModel, isLoading, onModelSelect
             onClick={onOpenSandbox}
             title="Файлы открыты как модальное окно"
           >
-            📁
+            <FolderIcon className="heroicon" aria-hidden="true" />
           </button>
         )}
       </div>

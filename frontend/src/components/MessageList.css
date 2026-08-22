@@ -135,10 +135,41 @@
   border-radius: 0;
 }
 
-.message-content table {
-  border-collapse: collapse;
-  margin: 0.35em 0 0.6em;
+.markdown-table-scroll {
   width: 100%;
+  max-width: 100%;
+  margin: 0.35em 0 0.6em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-color: #666 #1a1a1a;
+  scrollbar-width: thin;
+}
+
+.markdown-table-scroll:focus {
+  outline: 1px solid #4a90d9;
+  outline-offset: 2px;
+}
+
+.markdown-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.markdown-table-scroll::-webkit-scrollbar-thumb {
+  background: #666;
+  border-radius: 8px;
+}
+
+.markdown-table-scroll::-webkit-scrollbar-track {
+  background: #1a1a1a;
+  border-radius: 8px;
+}
+
+.markdown-table-scroll table {
+  border-collapse: collapse;
+  margin: 0;
+  width: max-content;
+  min-width: 100%;
   font-size: 0.9em;
 }
 

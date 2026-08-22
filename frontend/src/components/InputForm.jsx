@@ -1,3 +1,4 @@
+import { DocumentIcon, PaperClipIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useLayoutEffect, useRef } from "react";
 import "./InputForm.css";
 
@@ -80,7 +81,8 @@ export default function InputForm({
         <div className="attached-files-preview">
           {attachedFiles.map((file, i) => (
             <div key={i} className="attached-file-chip">
-              📄 {file.name}
+              <DocumentIcon className="heroicon" aria-hidden="true" />
+              <span>{file.name}</span>
               <button
                 type="button"
                 className="attached-file-remove"
@@ -88,7 +90,7 @@ export default function InputForm({
                   setAttachedFiles((prev) => prev.filter((_, idx) => idx !== i))
                 }
               >
-                ✕
+                <XMarkIcon className="heroicon" aria-hidden="true" />
               </button>
             </div>
           ))}
@@ -97,7 +99,7 @@ export default function InputForm({
 
       <div className="input-row">
         <label className="attach-button" title="Прикрепить файл">
-          📎
+          <PaperClipIcon className="heroicon" aria-hidden="true" />
           <input
             type="file"
             multiple

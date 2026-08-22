@@ -72,6 +72,7 @@ export default function App() {
     search_providers: "duckduckgo",
     search_proxy: "",
     web_fetch_enabled: "true",
+    web_search_fetch_results: "true",
   });
 
   const [sandboxOpen, setSandboxOpen] = useState(false);

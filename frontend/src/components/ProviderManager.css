@@ -121,7 +121,9 @@
 }
 
 .pm-provider-arrow {
-  font-size: 0.7rem;
+  display: flex;
+  align-items: center;
+  width: 0.9rem;
   color: #666;
 }
 
@@ -216,6 +218,9 @@
 }
 
 .pm-test-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.8rem;
   padding: 6px 10px;
   border-radius: 6px;

@@ -73,6 +73,7 @@ async def lifespan(app: FastAPI):
             "search_providers": "duckduckgo",  # comma-separated: duckduckgo,google,yandex,bing
             "search_proxy": "",                 # proxy URL for search requests
             "web_fetch_enabled": "true",        # enable/disable web_fetch tool
+            "web_search_fetch_results": "true", # fetch and extract the final search results
         }
         for key, value in web_defaults.items():
             res = await session.execute(select(Setting).where(Setting.key == key))

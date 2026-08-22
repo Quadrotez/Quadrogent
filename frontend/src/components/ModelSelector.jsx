@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
+import { useState, useEffect, useRef } from "react";
 import "./ModelSelector.css";
 
 export default function ModelSelector({ models, selectedModel, isLoading, onSelect, onOpenProviders }) {
@@ -103,7 +104,13 @@ export default function ModelSelector({ models, selectedModel, isLoading, onSele
         title="Выбрать модель"
       >
         <span className="ms-trigger-label">{buttonText}</span>
-        <span className="ms-trigger-arrow">{open ? "▴" : "▾"}</span>
+        <span className="ms-trigger-arrow">
+          {open ? (
+            <ChevronUpIcon className="heroicon" aria-hidden="true" />
+          ) : (
+            <ChevronDownIcon className="heroicon" aria-hidden="true" />
+          )}
+        </span>
       </button>
 
       {open && (

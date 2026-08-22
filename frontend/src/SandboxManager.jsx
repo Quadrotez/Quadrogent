@@ -1,3 +1,13 @@
+import {
+  ArrowDownTrayIcon,
+  ArrowUpIcon,
+  ArrowsPointingOutIcon,
+  DocumentIcon,
+  FolderIcon,
+  TrashIcon,
+  ViewColumnsIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
 import { useState, useEffect } from "react";
 import { fetchSandboxFiles, readSandboxFile, writeSandboxFile, clearSandbox, deleteSandboxFile } from "./api";
 import "./SandboxManager.css";
@@ -148,7 +158,7 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
           disabled={currentPath === ROOT_PATH}
           title="На уровень выше"
         >
-          ⬆
+          <ArrowUpIcon className="heroicon" aria-hidden="true" />
         </button>
         <div className="sandbox-breadcrumbs">
           {crumbs.map((crumb, i) => (
@@ -188,7 +198,11 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
                 title={entry.path}
               >
                 <span className="sandbox-entry-icon">
-                  {entry.type === "dir" ? "📁" : "📄"}
+                  {entry.type === "dir" ? (
+                    <FolderIcon className="heroicon" aria-hidden="true" />
+                  ) : (
+                    <DocumentIcon className="heroicon" aria-hidden="true" />
+                  )}
                 </span>
                 <span className="sandbox-entry-label">{entry.name}</span>
               </button>
@@ -200,7 +214,7 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
                     onClick={() => handleDownload(entry)}
                     title="Скачать"
                   >
-                    ⬇
+                    <ArrowDownTrayIcon className="heroicon" aria-hidden="true" />
                   </button>
                 )}
                 <button
@@ -208,7 +222,7 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
                   onClick={() => handleDelete(entry)}
                   title="Удалить"
                 >
-                  🗑
+                  <TrashIcon className="heroicon" aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -222,7 +236,10 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
     return (
       <div className="sandbox-panel">
         <div className="sandbox-header">
-          <h3 className="sandbox-title">📁 Файлы</h3>
+          <h3 className="sandbox-title">
+            <FolderIcon className="heroicon" aria-hidden="true" />
+            <span>Файлы</span>
+          </h3>
           <div className="sandbox-header-actions">
             <button className="sandbox-btn sandbox-btn--danger" onClick={handleClear}>
               Очистить
@@ -231,11 +248,12 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
               className="sandbox-mode-toggle"
               onClick={onToggleMode}
               title="Открыть как модальное окно"
-            >
-              ⛶
-            </button>
+                          >
+                <ArrowsPointingOutIcon className="heroicon" aria-hidden="true" />
+              </button>
+
             <button className="sandbox-btn sandbox-btn--close" onClick={onClose} title="Закрыть панель">
-              ✕
+              <XMarkIcon className="heroicon" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -249,7 +267,10 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
       <div className="sandbox-modal" onClick={(e) => e.stopPropagation()}>
         {/* Заголовок */}
         <div className="sandbox-header">
-          <h3 className="sandbox-title">📁 Файловая система модели</h3>
+          <h3 className="sandbox-title">
+            <FolderIcon className="heroicon" aria-hidden="true" />
+            <span>Файловая система модели</span>
+          </h3>
           <div className="sandbox-header-actions">
             <button className="sandbox-btn sandbox-btn--danger" onClick={handleClear}>
               Очистить всё
@@ -258,11 +279,12 @@ export default function SandboxManager({ onClose, mode = "modal", onToggleMode }
               className="sandbox-mode-toggle"
               onClick={onToggleMode}
               title="Закрепить как панель справа"
-            >
-              ▤
-            </button>
+                          >
+                <ViewColumnsIcon className="heroicon" aria-hidden="true" />
+              </button>
+
             <button className="sandbox-btn sandbox-btn--close" onClick={onClose} title="Закрыть">
-              ✕
+              <XMarkIcon className="heroicon" aria-hidden="true" />
             </button>
           </div>
         </div>

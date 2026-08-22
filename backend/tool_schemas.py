@@ -233,7 +233,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the web. You can choose a specific provider (duckduckgo, google, bing, yandex) or leave empty to search all enabled providers.",
+            "description": "Search the web. When automatic result fetching is enabled in settings, each result also includes compact page_content; otherwise it returns title, URL and snippet only. You can choose a specific provider (duckduckgo, google, bing, yandex) or leave empty to search all enabled providers.",
             "parameters": {
                 "type": "object",
                 "properties": {

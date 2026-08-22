@@ -21,6 +21,9 @@
 }
 
 .new-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.4rem 0.8rem;
   background-color: #0066cc;
   color: white;
@@ -95,13 +98,15 @@
   font-size: 0.85rem;
   padding: 0 0.25rem;
   display: none;
+  align-items: center;
+  justify-content: center;
   transition: color 0.2s;
   line-height: 1;
 }
 
 .chat-item:hover .chat-item-export,
 .chat-item:hover .chat-item-delete {
-  display: block;
+  display: inline-flex;
 }
 
 .chat-item-export:hover {

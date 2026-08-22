@@ -32,6 +32,9 @@
 }
 
 .presented-file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.875rem;
   font-weight: 500;
   overflow: hidden;
@@ -41,6 +44,10 @@
 }
 
 .presented-file-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   background: #0066cc;
   border: none;
   color: white;

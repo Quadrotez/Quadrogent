@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import httpx
+from bs4 import BeautifulSoup
 from sandbox_manager import SandboxManager
 from database import async_session
 from models import Setting
@@ -19,12 +20,77 @@ async def _get_search_settings():
             providers_r = await session.execute(select(Setting).where(Setting.key == "search_providers"))
             proxy_r = await session.execute(select(Setting).where(Setting.key == "search_proxy"))
             fetch_r = await session.execute(select(Setting).where(Setting.key == "web_fetch_enabled"))
+            search_fetch_r = await session.execute(
+                select(Setting).where(Setting.key == "web_search_fetch_results")
+            )
             providers = (providers_r.scalar_one_or_none() or Setting(key="", value="duckduckgo")).value
             proxy = (proxy_r.scalar_one_or_none() or Setting(key="", value="")).value
             fetch_enabled = (fetch_r.scalar_one_or_none() or Setting(key="", value="true")).value
-            return [p.strip() for p in providers.split(",") if p.strip()], proxy, fetch_enabled == "true"
+            search_fetch_enabled = (
+                search_fetch_r.scalar_one_or_none() or Setting(key="", value="true")
+            ).value
+            return (
+                [p.strip() for p in providers.split(",") if p.strip()],
+                proxy,
+                fetch_enabled == "true",
+                search_fetch_enabled == "true",
+            )
     except Exception:
-        return ["duckduckgo"], "", True
+        return ["duckduckgo"], "", True, True
+
+
+def _extract_page_text(html: str) -> str:
+    """Returns readable text from an HTML document without scripts or navigation clutter."""
+    soup = BeautifulSoup(html, "html.parser")
+    for element in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form"]):
+        element.decompose()
+    return " ".join(soup.stripped_strings)
+
+
+async def _fetch_search_result(url: str, proxy: str) -> dict:
+    """Fetches one search result and returns compact, model-ready page text."""
+    max_content_chars = 8_000
+    try:
+        parsed_url = httpx.URL(url)
+        if parsed_url.scheme not in {"http", "https"}:
+            return {"fetch_error": "Поддерживаются только HTTP(S)-ссылки."}
+
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+            proxy=proxy or None,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+        content_type = response.headers.get("content-type", "").lower()
+        if "html" in content_type:
+            content = _extract_page_text(response.text)
+        elif any(media_type in content_type for media_type in ("text", "json", "xml")):
+            content = response.text
+        else:
+            return {"fetch_error": f"Пропущен нетекстовый ответ: {content_type or 'unknown'}"}
+
+        content = content.strip()
+        if not content:
+            return {"fetch_error": "Страница не вернула извлекаемый текст."}
+
+        truncated = len(content) > max_content_chars
+        return {
+            "page_content": content[:max_content_chars],
+            "page_content_truncated": truncated,
+        }
+    except Exception as exc:
+        logger.info("Не удалось загрузить результат поиска %s: %s", url, exc)
+        return {"fetch_error": f"Ошибка загрузки: {exc}"}
+
+
+async def _enrich_search_results(results: list[dict], proxy: str) -> list[dict]:
+    """Fetches all selected search results concurrently while retaining their order."""
+    fetched = await asyncio.gather(
+        *[_fetch_search_result(result.get("href", ""), proxy) for result in results]
+    )
+    return [{**result, **page_data} for result, page_data in zip(results, fetched)]
 
 
 class ToolExecutor:
@@ -162,7 +228,7 @@ class ToolExecutor:
             query = args.get("query", "")
             max_results = int(args.get("max_results", 5))
             chosen_provider = args.get("provider", "").strip().lower()
-            enabled_providers, proxy, _ = await _get_search_settings()
+            enabled_providers, proxy, fetch_enabled, search_fetch_enabled = await _get_search_settings()
 
             # If model chose a specific provider and it's enabled — use only it
             # If not specified or invalid — use all enabled providers
@@ -267,15 +333,19 @@ class ToolExecutor:
                     logger.warning(f"Yandex search failed: {e}")
 
             if all_results:
+                selected_results = all_results[:max_results]
+                # Автоматическое извлечение включается отдельно и уважает общий запрет web_fetch.
+                if fetch_enabled and search_fetch_enabled:
+                    selected_results = await _enrich_search_results(selected_results, proxy)
                 return {
-                    "stdout": json.dumps(all_results[:max_results], ensure_ascii=False, indent=2),
+                    "stdout": json.dumps(selected_results, ensure_ascii=False, indent=2),
                     "exit_code": 0,
                 }
             return {"stdout": "", "stderr": "Поиск не дал результатов. Проверьте настройки провайдеров поиска.", "exit_code": 1}
 
         elif tool_name == "web_fetch":
             url = args.get("url", "")
-            _, proxy, fetch_enabled = await _get_search_settings()
+            _, proxy, fetch_enabled, _ = await _get_search_settings()
             if not fetch_enabled:
                 return {"stdout": "", "stderr": "Инструмент web_fetch отключён в настройках.", "exit_code": 1}
             try:

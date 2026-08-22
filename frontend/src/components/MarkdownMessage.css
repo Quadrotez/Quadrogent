@@ -29,20 +29,20 @@
   display: none;
 }
 
-.thinking-summary::before {
-  content: "▶";
-  font-size: 0.6rem;
+.thinking-chevron {
+  width: 0.8em;
   color: #666;
   transition: transform 0.2s;
-  flex-shrink: 0;
 }
 
-details[open].thinking-block > .thinking-summary::before {
+details[open].thinking-block > .thinking-summary .thinking-chevron {
   transform: rotate(90deg);
 }
 
 .thinking-icon {
-  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  color: #8b9ff5;
   flex-shrink: 0;
 }
 

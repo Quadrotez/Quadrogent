@@ -1,3 +1,9 @@
+import {
+  CheckCircleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  XCircleIcon,
+} from "@heroicons/react/24/outline";
 import { useState, useEffect } from "react";
 import { fetchProviders, saveApiKey, testProvider } from "../api";
 import "./ProviderManager.css";
@@ -139,7 +145,11 @@ export default function ProviderManager({ onSaved, onClose }) {
                     <span className="pm-toggle-thumb" />
                   </span>
                   <span className="pm-provider-arrow">
-                    {expandedProvider === p.name ? "▴" : "▾"}
+                    {expandedProvider === p.name ? (
+                      <ChevronUpIcon className="heroicon" aria-hidden="true" />
+                    ) : (
+                      <ChevronDownIcon className="heroicon" aria-hidden="true" />
+                    )}
                   </span>
                 </button>
 
@@ -203,8 +213,12 @@ export default function ProviderManager({ onSaved, onClose }) {
 
                     {testResults[p.name] && (
                       <div className={`pm-test-result pm-test-result--${testResults[p.name].status}`}>
-                        {testResults[p.name].status === "ok" ? "✓" : "✗"}{" "}
-                        {testResults[p.name].message}
+                        {testResults[p.name].status === "ok" ? (
+                          <CheckCircleIcon className="heroicon" aria-hidden="true" />
+                        ) : (
+                          <XCircleIcon className="heroicon" aria-hidden="true" />
+                        )}
+                        <span>{testResults[p.name].message}</span>
                       </div>
                     )}
                   </div>

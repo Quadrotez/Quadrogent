@@ -1,3 +1,11 @@
+import {
+  BookOpenIcon,
+  CheckCircleIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  ExclamationCircleIcon,
+  WrenchScrewdriverIcon,
+} from "@heroicons/react/24/outline";
 import "./ToolCallBlock.css";
 
 /**
@@ -37,11 +45,28 @@ export default function ToolCallBlock({ tool, input, result }) {
     <div className={`tool-call-block ${isPending ? "pending" : isSuccess ? "success" : "error"}`}>
       <details>
         <summary className="tool-call-summary">
+          <ChevronRightIcon className="heroicon tool-call-chevron" aria-hidden="true" />
           <span className="tool-call-status-icon">
-            {isPending ? "⏳" : isSuccess ? "✅" : "❌"}
+            {isPending ? (
+              <ClockIcon className="heroicon" aria-hidden="true" />
+            ) : isSuccess ? (
+              <CheckCircleIcon className="heroicon" aria-hidden="true" />
+            ) : (
+              <ExclamationCircleIcon className="heroicon" aria-hidden="true" />
+            )}
           </span>
           <span className="tool-call-name">
-            {tool === "read_skill" ? "📖 Изучение скилла: " : "🛠️ Инструмент: "}
+            {tool === "read_skill" ? (
+              <>
+                <BookOpenIcon className="heroicon" aria-hidden="true" />
+                <span>Изучение скилла:</span>
+              </>
+            ) : (
+              <>
+                <WrenchScrewdriverIcon className="heroicon" aria-hidden="true" />
+                <span>Инструмент:</span>
+              </>
+            )}
             <strong>{tool === "read_skill" ? (displayParams?.name || tool) : tool}</strong>
           </span>
           <span className="tool-call-badge">

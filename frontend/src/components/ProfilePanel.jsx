@@ -286,6 +286,29 @@ export default function ProfilePanel({
                 </label>
               </div>
 
+              <div className="setting-group setting-toggle-group">
+                <label className="setting-toggle-label">
+                  <span>
+                    <span className="setting-toggle-title">Загружать результаты поиска</span>
+                    <span className="setting-info">
+                      После web_search ИИ автоматически получает очищенный текст каждой найденной страницы. Работает, только когда включён Web Fetch.
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className={`setting-toggle ${modelSettings.web_search_fetch_results !== "false" ? "setting-toggle--on" : ""}`}
+                    onClick={() =>
+                      handleModelSettingChange(
+                        "web_search_fetch_results",
+                        modelSettings.web_search_fetch_results === "false" ? "true" : "false"
+                      )
+                    }
+                  >
+                    <span className="setting-toggle-knob" />
+                  </button>
+                </label>
+              </div>
+
               <div className="setting-group">
                 <label>Провайдеры поиска</label>
                 <div className="search-providers">

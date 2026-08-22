@@ -1,3 +1,8 @@
+import {
+  ArrowPathIcon,
+  ChevronRightIcon,
+  SparklesIcon,
+} from "@heroicons/react/24/outline";
 import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,8 +18,13 @@ function ThinkingBlock({ content, complete }) {
   return (
     <details className="thinking-block">
       <summary className="thinking-summary">
+        <ChevronRightIcon className="heroicon thinking-chevron" aria-hidden="true" />
         <span className="thinking-icon">
-          {complete ? "💭" : "⏳"}
+          {complete ? (
+            <SparklesIcon className="heroicon" aria-hidden="true" />
+          ) : (
+            <ArrowPathIcon className="heroicon" aria-hidden="true" />
+          )}
         </span>
         {complete ? "В раздумье…" : "Думаю…"}
       </summary>
@@ -38,6 +48,16 @@ function MarkdownBlock({ content }) {
       components={{
         a: ({ node: _node, ...props }) => (
           <a {...props} target="_blank" rel="noopener noreferrer" />
+        ),
+        table: ({ node: _node, ...props }) => (
+          <div
+            className="markdown-table-scroll"
+            tabIndex="0"
+            role="region"
+            aria-label="Прокручиваемая таблица"
+          >
+            <table {...props} />
+          </div>
         ),
       }}
     >

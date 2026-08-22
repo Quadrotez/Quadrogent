@@ -1,3 +1,8 @@
+import {
+  ArchiveBoxIcon,
+  ArrowDownTrayIcon,
+  DocumentIcon,
+} from "@heroicons/react/24/outline";
 import "./PresentedFiles.css";
 
 const API_BASE = "http://localhost:8000";
@@ -8,13 +13,15 @@ export default function PresentedFiles({ files }) {
   return (
     <div className="presented-files">
       <h4 className="presented-files-title">
-        <span>🎁</span> Презентованные файлы
+        <ArchiveBoxIcon className="heroicon" aria-hidden="true" />
+        <span>Презентованные файлы</span>
       </h4>
       <div className="presented-files-grid">
         {files.map((file, i) => (
           <div key={i} className="presented-file-card">
             <div className="presented-file-name" title={file.path}>
-              📄 {file.name}
+              <DocumentIcon className="heroicon" aria-hidden="true" />
+              <span>{file.name}</span>
             </div>
             <button
               className="presented-file-download"
@@ -23,7 +30,8 @@ export default function PresentedFiles({ files }) {
                 window.open(url, "_blank");
               }}
             >
-              ⬇ Скачать
+              <ArrowDownTrayIcon className="heroicon" aria-hidden="true" />
+              <span>Скачать</span>
             </button>
           </div>
         ))}

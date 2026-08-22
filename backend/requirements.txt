@@ -8,3 +8,4 @@ pydantic-settings>=2.5.2
 python-dotenv>=1.0.1
 python-multipart
 duckduckgo_search>=7.5.0
+beautifulsoup4>=4.12.0
