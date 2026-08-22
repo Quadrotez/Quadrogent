@@ -80,6 +80,8 @@ async def chat_stream(
         "model": model,
         "messages": messages,
         "stream": True,
+        # Thinking-модели (например Qwen3) отдают reasoning отдельно в message.thinking.
+        "think": True,
         "options": {
             "num_ctx": model_settings["num_ctx"],
             "temperature": model_settings["temperature"],
@@ -92,6 +94,7 @@ async def chat_stream(
         payload["tools"] = tools
 
     accumulated_text = ""
+    thinking_active = False
     # Accumulate streaming tool calls by index (like OpenAI client)
     tool_call_buffers: dict[int, dict] = {}
 
@@ -111,8 +114,24 @@ async def chat_stream(
                     continue
 
                 message = chunk.get("message", {})
+
+                # Thinking-модели Ollama передают reasoning отдельно от финального ответа.
+                # Оборачиваем его в уже поддерживаемые UI-теги, сохраняя потоковый вывод.
+                thinking = message.get("thinking", "")
+                if thinking:
+                    if not thinking_active:
+                        thinking_active = True
+                        accumulated_text += "<think>"
+                        yield "<think>"
+                    accumulated_text += thinking
+                    yield thinking
+
                 content = message.get("content", "")
                 if content:
+                    if thinking_active:
+                        thinking_active = False
+                        accumulated_text += "</think>\n\n"
+                        yield "</think>\n\n"
                     accumulated_text += content
                     yield content
 
@@ -143,6 +162,10 @@ async def chat_stream(
 
                 if chunk.get("done"):
                     break
+
+    if thinking_active:
+        accumulated_text += "</think>"
+        yield "</think>"
 
     # Build final tool_calls list
     final_tool_calls = []
